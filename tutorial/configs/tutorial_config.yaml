@@ -1,0 +1,57 @@
+# Simplified Tutorial Configuration
+# This config is designed for learning and experimentation
+
+# Model settings
+generator_ckpt: checkpoints/ode_init.pt  # Path to pretrained model (if available)
+num_frame_per_block: 3
+independent_first_frame: false
+
+# Training settings
+batch_size: 1
+total_batch_size: 4  # Effective batch size with gradient accumulation
+lr: 2.0e-06
+beta1: 0.0
+beta2: 0.999
+weight_decay: 0.01
+
+# Training schedule
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+num_train_timestep: 1000
+timestep_shift: 5.0
+
+# Loss settings
+denoising_loss_type: flow
+guidance_scale: 3.0
+
+# Data settings
+num_training_frames: 21
+prompt_path: tutorial/data/prompts/toy_prompts.txt
+
+# Output settings
+height: 256  # Reduced for tutorial (original: 480)
+width: 256   # Reduced for tutorial (original: 832)
+num_frames: 16  # Reduced for tutorial (original: 81)
+
+# Training control
+log_iters: 10  # Log every N iterations
+save_iters: 50  # Save checkpoint every N iterations
+max_iters: 100  # Maximum training iterations (for tutorial)
+
+# Evaluation
+eval_first_n: 10  # Evaluate on first N samples
+num_samples: 1
+
+# Mixed precision
+mixed_precision: true
+
+# Other settings
+seed: 42
+causal: true
+same_step_across_blocks: true
+last_step_only: false
+context_noise: 0
