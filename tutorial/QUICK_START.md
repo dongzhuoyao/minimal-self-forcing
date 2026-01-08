@@ -44,16 +44,6 @@ results = compute_all_metrics(videos, prompts)
 print(results)
 ```
 
-## 4. Run Examples
-
-```bash
-# Inference example
-python tutorial/examples/inference_example.py --mode inference
-
-# Evaluation example
-python tutorial/examples/inference_example.py --mode evaluation
-```
-
 ## Integration with Original Codebase
 
 The tutorial components can be used alongside the original Self-Forcing codebase:

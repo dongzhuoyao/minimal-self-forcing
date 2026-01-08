@@ -88,12 +88,9 @@ tutorial/
 │   └── training_plots.py        # Training progress plots
 ├── configs/
 │   └── tutorial_config.yaml     # Simplified config
-├── training/
-│   ├── trainer.py               # Simplified trainer
-│   └── train_tutorial.py        # Training script
-└── examples/
-    ├── inference_example.py     # Inference examples
-    └── algorithm_example.py     # Algorithm demonstration
+└── training/
+    ├── trainer.py               # Simplified trainer
+    └── train_tutorial.py        # Training script
 ```
 
 ## Components
@@ -212,29 +209,6 @@ This demonstrates:
 - Training loop with toy dataset
 - Checkpoint saving and metrics logging
 
-### Run Algorithm Demonstration
-
-```bash
-python tutorial/examples/algorithm_example.py
-```
-
-This demonstrates:
-- How Self-Forcing simulates inference during training
-- Block-by-block autoregressive generation
-- KV cache growth and usage
-- Algorithm flow visualization
-
-### Run Inference Example
-
-```bash
-python tutorial/examples/inference_example.py --mode inference
-```
-
-### Run Evaluation Example
-
-```bash
-python tutorial/examples/inference_example.py --mode evaluation
-```
 
 ## Integration with Original Codebase
 

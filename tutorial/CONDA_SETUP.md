@@ -62,10 +62,10 @@ conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
 Run a simple test to verify everything works:
 
 ```bash
-python tutorial/examples/visualize_toy_dataset.py --num_samples 3
+python -c "from tutorial.data import ToyDataset; dataset = ToyDataset(num_samples=3); print('✓ Installation successful!')"
 ```
 
-This should create visualization outputs without errors.
+This should import the tutorial modules without errors.
 
 ## Troubleshooting
 
@@ -73,7 +73,7 @@ This should create visualization outputs without errors.
 If you get `ModuleNotFoundError: No module named 'tutorial'`, make sure you're running scripts from the repository root:
 ```bash
 cd /path/to/self-forcing
-python tutorial/examples/visualize_toy_dataset.py --num_samples 3
+python -c "from tutorial.data import ToyDataset; print('✓ Import successful!')"
 ```
 
 ### CUDA issues
