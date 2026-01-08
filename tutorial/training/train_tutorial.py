@@ -158,9 +158,8 @@ def main():
         weight_decay=0.01
     )
     
-    # Create scheduler and loss
+    # Create scheduler
     scheduler = SimpleScheduler()
-    loss_fn = nn.MSELoss()
     
     # Create trainer
     print("\n3. Creating trainer...")
@@ -168,7 +167,6 @@ def main():
         generator=generator,
         optimizer=optimizer,
         scheduler=scheduler,
-        loss_fn=loss_fn,
         device=args.device,
         log_dir=args.log_dir,
         save_interval=args.save_interval,
