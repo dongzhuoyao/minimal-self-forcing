@@ -1,2 +1,9 @@
 .DS_Store
 tutorial/data/__pycache__/__init__.cpython-313.pyc
+tutorial/outputs/*
+tutorial/__pycache__/*
+tutorial/visualization/__pycache__/
+tutorial/data/__pycache__/
+tutorial/evaluation/__pycache__/
+tutorial/__pycache__/
+tutorial/data/__pycache__/*

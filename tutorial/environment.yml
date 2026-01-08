@@ -1,0 +1,17 @@
+name: sf
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9,<3.12
+  - pytorch>=2.0.0
+  - torchvision>=0.15.0
+  - numpy>=1.20.0
+  - matplotlib>=3.5.0
+  - pillow>=8.0.0
+  - pip
+  - pip:
+    - imageio>=2.9.0
+    - imageio-ffmpeg>=0.4.0
+    - tqdm>=4.64.0
