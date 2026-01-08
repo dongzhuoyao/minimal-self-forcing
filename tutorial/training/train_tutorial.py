@@ -18,60 +18,7 @@ from tutorial.training.trainer import SimplifiedTrainer
 from tutorial.data import ToyDataset
 from tutorial.visualization import TrainingPlotter
 from tutorial.algorithm import SimplifiedSelfForcingPipeline
-
-
-class SimpleVideoGenerator(nn.Module):
-    """
-    Simplified video generator for tutorial.
-    
-    In practice, this would be a complex transformer model.
-    """
-    
-    def __init__(self, channels=3, height=64, width=64):
-        super().__init__()
-        self.channels = channels
-        self.height = height
-        self.width = width
-        
-        # Simple conv layers
-        self.conv1 = nn.Conv2d(channels, 32, 3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.conv3 = nn.Conv2d(64, channels, 3, padding=1)
-        self.relu = nn.ReLU()
-        self.norm = nn.BatchNorm2d(32)
-    
-    def forward(self, x, timestep, conditional_dict):
-        """
-        Forward pass.
-        
-        Args:
-            x: Input tensor (B, F, C, H, W)
-            timestep: Timestep tensor (B, F)
-            conditional_dict: Conditional information
-        
-        Returns:
-            denoised: Denoised output (B, F, C, H, W)
-            extra: Extra information
-        """
-        batch_size, num_frames = x.shape[:2]
-        
-        # Process each frame
-        outputs = []
-        for f in range(num_frames):
-            frame = x[:, f]  # (B, C, H, W)
-            
-            # Simple denoising
-            out = self.relu(self.norm(self.conv1(frame)))
-            out = self.relu(self.conv2(out))
-            out = self.conv3(out)
-            
-            # Residual connection
-            out = out + frame
-            
-            outputs.append(out)
-        
-        denoised = torch.stack(outputs, dim=1)  # (B, F, C, H, W)
-        return denoised, None
+from tutorial.model import TinyCausalWanModel
 
 
 class SimpleScheduler:
@@ -96,17 +43,20 @@ class SimpleScheduler:
 class SimpleTextEncoder(nn.Module):
     """Simple text encoder for tutorial."""
     
-    def __init__(self, device="cuda"):
+    def __init__(self, device="cuda", text_dim=128):
         super().__init__()
         self.device = device
+        self.text_dim = text_dim
     
     def forward(self, text_prompts):
         """Encode text prompts (simplified)."""
         batch_size = len(text_prompts)
-        # Return dummy embeddings
+        # Return dummy embeddings matching TinyCausalWanModel's expected format
+        # Shape: [B, text_len, text_dim] where text_len=77 (standard)
+        text_len = 77
         return {
-            "text_embeddings": torch.randn(
-                batch_size, 77, 768, device=self.device
+            "prompt_embeds": torch.randn(
+                batch_size, text_len, self.text_dim, device=self.device
             )
         }
 
@@ -148,8 +98,21 @@ def main():
     
     # Create model
     print("\n2. Creating model...")
-    generator = SimpleVideoGenerator(channels=3, height=64, width=64)
+    # Use TinyCausalWanModel
+    generator = TinyCausalWanModel(
+        in_dim=3,  # RGB channels
+        out_dim=3,
+        dim=256,  # Hidden dimension 
+        ffn_dim=1024,  # FFN dimension 
+        num_heads=4,  # Attention heads 
+        num_layers=4,  # Transformer layers 
+        patch_size=(1, 2, 2),  # Patch size for embedding
+        text_dim=128,  # Text embedding dimension
+        freq_dim=256,  # Time embedding dimension
+        num_frame_per_block=3,  # Frames per block for causal mask
+    )
     print(f"   Model parameters: {sum(p.numel() for p in generator.parameters()):,}")
+    print(f"   Using TinyCausalWanModel (transformer backbone)")
     
     # Create optimizer
     optimizer = torch.optim.AdamW(
@@ -173,8 +136,8 @@ def main():
         log_interval=args.log_interval
     )
     
-    # Create text encoder
-    text_encoder = SimpleTextEncoder(device=args.device)
+    # Create text encoder (matching TinyCausalWanModel's text_dim)
+    text_encoder = SimpleTextEncoder(device=args.device, text_dim=128)
     
     # Training plotter
     plotter = TrainingPlotter(save_dir=str(Path(args.log_dir) / "plots"))

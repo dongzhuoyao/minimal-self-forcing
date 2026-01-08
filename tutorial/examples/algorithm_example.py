@@ -21,6 +21,7 @@ from tutorial.algorithm import (
 )
 from tutorial.data import ToyDataset
 from tutorial.visualization import save_video_grid
+from tutorial.model import TinyCausalWanModel
 
 
 class SimpleVideoGenerator(nn.Module):
@@ -123,7 +124,12 @@ def demonstrate_algorithm():
     print(f"Device: {device}")
     
     # Create simple generator
-    generator = SimpleVideoGenerator(channels=3, height=64, width=64)
+    # Use TinyCausalWanModel (tiny transformer backbone)
+    generator = TinyCausalWanModel(
+        in_dim=3, out_dim=3, dim=128, ffn_dim=256,
+        num_heads=4, num_layers=2, patch_size=(1, 2, 2),
+        text_dim=128, freq_dim=64
+    )
     generator = generator.to(device)
     print("✓ Generator created")
     
