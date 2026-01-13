@@ -257,6 +257,13 @@ class TinyCausalWanModel(nn.Module):
         seq_len = x.shape[1]
         seq_lens = torch.tensor([seq_len] * batch_size, device=device, dtype=torch.long)
         
+        # Create block mask if not already created
+        if self.block_mask is None:
+            frame_seqlen = seq_len // num_frames
+            self.block_mask = self._prepare_blockwise_causal_attn_mask(
+                device, num_frames, frame_seqlen, self.num_frame_per_block
+            )
+        
         # Time embedding
         if timestep.dim() == 2:
             # [B, F] -> [B*F]
@@ -339,7 +346,8 @@ class TinyCausalWanModel(nn.Module):
         """Create sinusoidal embeddings for timesteps."""
         half_dim = dim // 2
         emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+        # Create embedding tensor on the same device as timesteps
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=timesteps.device) * -emb)
         emb = timesteps.float()[:, None] * emb[None, :]
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
         if dim % 2 == 1:  # zero pad
@@ -586,29 +594,56 @@ class TinyMultiHeadAttention(nn.Module):
                 
                 # Pad to multiple of 128 for FlexAttention
                 padded_length = math.ceil(seq_len / 128) * 128 - seq_len
-                padded_q = torch.cat([
-                    roped_query,
-                    torch.zeros([batch_size, padded_length, self.num_heads, self.head_dim],
-                               device=roped_query.device, dtype=v.dtype)
-                ], dim=1)
-                padded_k = torch.cat([
-                    roped_key,
-                    torch.zeros([batch_size, padded_length, self.num_heads, self.head_dim],
-                               device=roped_key.device, dtype=v.dtype)
-                ], dim=1)
-                padded_v = torch.cat([
-                    v,
-                    torch.zeros([batch_size, padded_length, self.num_heads, self.head_dim],
-                               device=v.device, dtype=v.dtype)
-                ], dim=1)
+                padded_seq_len = seq_len + padded_length
                 
-                # FlexAttention
-                out = flex_attention(
-                    query=padded_q.transpose(1, 2),  # [B, num_heads, L+pad, head_dim]
-                    key=padded_k.transpose(1, 2),
-                    value=padded_v.transpose(1, 2),
-                    block_mask=block_mask
-                )[:, :, :-padded_length].transpose(1, 2)  # [B, num_heads, L, head_dim]
+                # Check if block_mask is valid for this sequence length
+                # If block_mask is None or doesn't match, use standard attention
+                use_flex_attention = (block_mask is not None)
+                
+                if use_flex_attention:
+                    padded_q = torch.cat([
+                        roped_query,
+                        torch.zeros([batch_size, padded_length, self.num_heads, self.head_dim],
+                                   device=roped_query.device, dtype=v.dtype)
+                    ], dim=1)
+                    padded_k = torch.cat([
+                        roped_key,
+                        torch.zeros([batch_size, padded_length, self.num_heads, self.head_dim],
+                                   device=roped_key.device, dtype=v.dtype)
+                    ], dim=1)
+                    padded_v = torch.cat([
+                        v,
+                        torch.zeros([batch_size, padded_length, self.num_heads, self.head_dim],
+                                   device=v.device, dtype=v.dtype)
+                    ], dim=1)
+                    
+                    # FlexAttention
+                    try:
+                        out = flex_attention(
+                            query=padded_q.transpose(1, 2),  # [B, num_heads, L+pad, head_dim]
+                            key=padded_k.transpose(1, 2),
+                            value=padded_v.transpose(1, 2),
+                            block_mask=block_mask
+                        )
+                        # Remove padding
+                        if padded_length > 0:
+                            out = out[:, :, :-padded_length]
+                        out = out.transpose(1, 2)  # [B, num_heads, L, head_dim]
+                    except (RuntimeError, ValueError) as e:
+                        # Fallback to standard attention if flex_attention fails
+                        use_flex_attention = False
+                
+                if not use_flex_attention:
+                    # Standard attention fallback
+                    q_rope = roped_query.transpose(1, 2)  # [B, num_heads, L, head_dim]
+                    k_rope = roped_key.transpose(1, 2)
+                    v_trans = v.transpose(1, 2)
+                    
+                    scale = 1.0 / math.sqrt(self.head_dim)
+                    attn = torch.matmul(q_rope, k_rope.transpose(-2, -1)) * scale
+                    attn = torch.softmax(attn, dim=-1)
+                    out = torch.matmul(attn, v_trans)
+                    out = out.transpose(1, 2)  # [B, num_heads, L, head_dim]
                 
                 out = out.contiguous().view(batch_size, seq_len, self.dim)
         

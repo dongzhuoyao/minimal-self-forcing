@@ -11,8 +11,11 @@ import argparse
 from pathlib import Path
 import sys
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "original_impl"))
+# Add root directory to path so we can import tutorial
+root_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(root_dir))
+# Add original_impl directory to path
+sys.path.insert(0, str(root_dir / "original_impl"))
 
 from tutorial.training.trainer import SimplifiedTrainer
 from tutorial.data import ToyDataset
@@ -150,6 +153,10 @@ def main():
         epoch_losses = []
         
         for batch_idx, batch in enumerate(dataloader):
+            # DataLoader batches "prompt" (singular) from dataset as a list
+            # Trainer expects "prompts" (plural), so rename it
+            batch["prompts"] = batch["prompt"]
+            
             # Encode prompts
             with torch.no_grad():
                 conditional_dict = text_encoder(batch["prompts"])
