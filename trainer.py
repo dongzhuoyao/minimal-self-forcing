@@ -538,7 +538,8 @@ class SimplifiedTrainer:
         num_frames: int = 9,
         num_frames_per_block: int = 3,
         prompts: Optional[List[str]] = None,
-        ground_truth_videos: Optional[torch.Tensor] = None
+        ground_truth_videos: Optional[torch.Tensor] = None,
+        gif_fps: int = 2
     ):
         """
         Generate sample videos for visualization during training.
@@ -550,6 +551,7 @@ class SimplifiedTrainer:
             num_frames_per_block: Frames per block for generation
             prompts: Optional list of prompts (uses defaults if None)
             ground_truth_videos: Optional ground truth videos [B, F, C, H, W] to log alongside generated videos
+            gif_fps: Frames per second for GIF playback (default: 2, slower playback)
         """
         self.generator.eval()
         
@@ -630,7 +632,7 @@ class SimplifiedTrainer:
             videos_list = []
             for i, video_tensor in enumerate(generated_videos):
                 gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
-                create_video_gif(video_tensor, str(gif_path), fps=8)
+                create_video_gif(video_tensor, str(gif_path), fps=gif_fps)
                 videos_list.append(video_tensor)
             
             # Save GIFs for ground truth videos if provided
@@ -638,7 +640,7 @@ class SimplifiedTrainer:
             if gt_videos_list is not None:
                 for i, gt_video in enumerate(gt_videos_list):
                     gt_gif_path = self.samples_dir / f"step_{self.step:06d}_gt_{i:02d}.gif"
-                    create_video_gif(gt_video, str(gt_gif_path), fps=8)
+                    create_video_gif(gt_video, str(gt_gif_path), fps=gif_fps)
                     gt_gif_paths.append(gt_gif_path)
             
             # Save grid of generated videos
@@ -674,20 +676,42 @@ class SimplifiedTrainer:
                         "samples/comparison_grid": wandb.Image(str(comparison_grid_path)),
                     }, step=self.step)
                 
-                # Log individual generated videos as GIFs
+                # Create a summary table of prompts for better visibility
+                prompts_table = wandb.Table(
+                    columns=["Sample", "Prompt"],
+                    data=[[i, prompt] for i, prompt in enumerate(sample_prompts)]
+                )
+                wandb.log({
+                    "samples/prompts_table": prompts_table
+                }, step=self.step)
+                
+                # Log individual generated videos as GIFs with captions
                 for i, (video_tensor, prompt) in enumerate(zip(videos_list, sample_prompts)):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                     wandb.log({
-                        f"samples/generated_video_{i}": wandb.Video(str(gif_path), format="gif"),
-                        f"samples/prompt_{i}": prompt
+                        f"samples/generated_video_{i}": wandb.Video(
+                            str(gif_path), 
+                            format="gif",
+                            caption=f"Generated: {prompt}"
+                        ),
                     }, step=self.step)
                 
-                # Log ground truth videos if available
+                # Log ground truth videos if available with captions
                 if gt_gif_paths:
                     for i, (gt_gif_path, prompt) in enumerate(zip(gt_gif_paths, sample_prompts)):
                         wandb.log({
-                            f"samples/ground_truth_video_{i}": wandb.Video(str(gt_gif_path), format="gif"),
+                            f"samples/ground_truth_video_{i}": wandb.Video(
+                                str(gt_gif_path), 
+                                format="gif",
+                                caption=f"Ground Truth: {prompt}"
+                            ),
                         }, step=self.step)
+                
+                # Also log prompts as text for easy reference (one log entry per prompt)
+                for i, prompt in enumerate(sample_prompts):
+                    wandb.log({
+                        f"samples/prompt_{i}": prompt
+                    }, step=self.step)
         
         self.generator.train()
     
@@ -1148,7 +1172,8 @@ def main():
                 num_frames=gen_cfg.get('viz_num_frames', 9),
                 num_frames_per_block=num_frame_per_block,
                 prompts=viz_prompts,
-                ground_truth_videos=ground_truth_videos
+                ground_truth_videos=ground_truth_videos,
+                gif_fps=gen_cfg.get('gif_fps', 2)
             )
         
         # Check if we've reached the target number of steps
@@ -1185,12 +1210,15 @@ def main():
     except:
         pass  # No ground truth available, that's okay
     
+    # Get gif_fps from config
+    gen_cfg = config.get('generation', {})
     trainer.generate_sample_videos(
         text_encoder=text_encoder,
         num_samples=4,
         num_frames=9,
         num_frames_per_block=3,
-        ground_truth_videos=ground_truth_videos
+        ground_truth_videos=ground_truth_videos,
+        gif_fps=gen_cfg.get('gif_fps', 2)
     )
     
     # Finish wandb run

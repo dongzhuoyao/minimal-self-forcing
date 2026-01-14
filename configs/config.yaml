@@ -55,6 +55,7 @@ generation:
   # Sample generation during training
   num_viz_samples: 4          # Number of sample videos to generate during training
   viz_num_frames: 9           # Number of frames for visualization samples
+  gif_fps: 2                  # Frames per second for GIF playback (lower = slower, default: 2)
 
 # Paths and Directories
 paths:

@@ -19,22 +19,29 @@ pip install git+https://github.com/openai/CLIP.git
 Train the Self-Forcing model:
 
 ```bash
-python trainer.py --num_steps 1000
+python trainer.py --num_steps 1000 --batch_size 16 --lr 1e-5
 ```
 
 **Key Arguments:**
 - `--num_steps`: Number of training steps (default: 1000)
-- `--batch_size`: Batch size (default: 64)
-- `--lr`: Learning rate (default: 1e-4)
+- `--batch_size`: Batch size (default: 16, from config)
+- `--lr`: Learning rate (default: 1e-4, from config)
 - `--num_samples`: Number of training samples in toy dataset (default: 20)
 - `--log_dir`: Directory to save logs and checkpoints (default: logs/training)
-- `--save_interval`: Save checkpoint every N steps (default: 10)
+- `--save_interval`: Save checkpoint every N steps (default: 100)
 - `--log_interval`: Log metrics every N steps (default: 5)
 - `--device`: Device to use, cuda or cpu (default: auto-detects CUDA)
 
-**Example:**
+**Examples:**
 ```bash
-python trainer.py --num_steps 1000 --batch_size 16 --lr 1e-4
+# Basic training with defaults
+python trainer.py --num_steps 1000
+
+# Custom batch size and learning rate
+python trainer.py --num_steps 1000 --batch_size 32 --lr 2e-4
+
+# Full example with all common arguments
+python trainer.py --num_steps 1000 --batch_size 16 --lr 1e-4 --num_samples 50
 ```
 
 ## Sampling/Generation

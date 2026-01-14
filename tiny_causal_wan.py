@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import math
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from einops import rearrange
 
 
 def rope_params(max_seq_len, dim, theta=10000):
@@ -238,7 +239,7 @@ class TinyCausalWanModel(nn.Module):
         device = noisy_image_or_video.device
         
         # Convert to [B, C, F, H, W] for Conv3d
-        x = noisy_image_or_video.permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
+        x = rearrange(noisy_image_or_video, 'b f c h w -> b c f h w')  # [B, C, F, H, W]
         
         # Patch embedding: [B, C, F, H, W] -> [B, dim, F', H', W']
         x = self.patch_embedding(x)
@@ -322,7 +323,7 @@ class TinyCausalWanModel(nn.Module):
             output = output.reshape(
                 batch_size, self.out_dim, patch_prod, num_frames, h_patched, w_patched
             )
-            output = output.permute(0, 3, 1, 4, 2, 5)  # [B, F, out_dim, H', patch_t, W', patch_w]
+            output = rearrange(output, 'b out_dim patch_prod f h w -> b f out_dim h patch_prod w')  # [B, F, out_dim, H', patch_prod, W']
             output = output.reshape(
                 batch_size, num_frames, self.out_dim,
                 h_patched * self.patch_size[1], w_patched * self.patch_size[2]
