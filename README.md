@@ -24,20 +24,20 @@ pip install git+https://github.com/openai/CLIP.git
 ### Generate Toy Dataset
 
 ```python
-from tutorial.data import ToyDataset
+from data import ToyDataset
 
 # Create a toy dataset with 100 synthetic videos
 dataset = ToyDataset(num_samples=100, width=256, height=256, num_frames=16)
 
 # Save prompts for training
-dataset.save_prompts("tutorial/data/prompts/toy_prompts.txt")
+dataset.save_prompts("data/prompts/toy_prompts.txt")
 ```
 
 ### Visualize Videos
 
 ```python
-from tutorial.visualization import create_video_gif, save_video_grid
-from tutorial.data import ToyDataset
+from visualization import create_video_gif, save_video_grid
+from data import ToyDataset
 
 dataset = ToyDataset(num_samples=9)
 videos = [dataset[i]["video"] for i in range(9)]
@@ -54,8 +54,8 @@ for i, video in enumerate(videos):
 ### Evaluate Videos
 
 ```python
-from tutorial.evaluation import compute_all_metrics
-from tutorial.data import ToyDataset
+from evaluation import compute_all_metrics
+from data import ToyDataset
 
 dataset = ToyDataset(num_samples=10)
 videos = [dataset[i]["video"] for i in range(10)]
@@ -73,7 +73,6 @@ for metric_name, value in results.items():
 ## Directory Structure
 
 ```
-tutorial/
 ├── algorithm/                   # Self-Forcing algorithm implementation
 │   ├── self_forcing_algorithm.py  # Core algorithm
 │   ├── visualization.py         # Algorithm visualization
@@ -107,7 +106,7 @@ tutorial/
 
 **Usage:**
 ```python
-from tutorial.algorithm import SimplifiedSelfForcingPipeline, explain_self_forcing
+from algorithm import SimplifiedSelfForcingPipeline, explain_self_forcing
 
 # Understand the algorithm
 print(explain_self_forcing())
@@ -129,7 +128,7 @@ Generate synthetic videos with simple animations:
 
 **Usage:**
 ```python
-from tutorial.data import ToyVideoGenerator
+from data import ToyVideoGenerator
 
 generator = ToyVideoGenerator(width=256, height=256, num_frames=16)
 video, prompt = generator.generate_moving_shape(
@@ -149,7 +148,7 @@ Available metrics:
 
 **Usage:**
 ```python
-from tutorial.evaluation import FrameConsistencyMetric, CLIPScoreMetric
+from evaluation import FrameConsistencyMetric, CLIPScoreMetric
 
 consistency_metric = FrameConsistencyMetric()
 score = consistency_metric.compute(video)
@@ -168,7 +167,7 @@ clip_score = clip_metric.compute(video, "A red circle moving")
 
 **Usage:**
 ```python
-from tutorial.training import SimplifiedTrainer
+from trainer import SimplifiedTrainer
 
 trainer = SimplifiedTrainer(
     generator=model,
@@ -189,7 +188,7 @@ Tools for visualizing videos and training:
 
 **Usage:**
 ```python
-from tutorial.visualization import save_video_grid, create_video_gif
+from visualization import save_video_grid, create_video_gif
 
 save_video_grid(videos, "grid.png", prompts=prompts)
 create_video_gif(video, "output.gif", fps=8)
@@ -200,7 +199,7 @@ create_video_gif(video, "output.gif", fps=8)
 ### Run Training Example
 
 ```bash
-python tutorial/training/train_tutorial.py --num_epochs 5 --batch_size 2
+python train_tutorial.py --num_epochs 5 --batch_size 2
 ```
 
 This demonstrates:
@@ -216,7 +215,7 @@ To use the tutorial components with the original Self-Forcing codebase:
 
 1. **Use toy dataset for training:**
    ```python
-   from tutorial.data import ToyDataset
+   from data import ToyDataset
    dataset = ToyDataset(num_samples=100)
    dataset.save_prompts("prompts/toy_prompts.txt")
    # Use in training config
@@ -224,13 +223,13 @@ To use the tutorial components with the original Self-Forcing codebase:
 
 2. **Evaluate generated videos:**
    ```python
-   from tutorial.evaluation import compute_all_metrics
+   from evaluation import compute_all_metrics
    results = compute_all_metrics(generated_videos, prompts)
    ```
 
 3. **Visualize results:**
    ```python
-   from tutorial.visualization import save_video_grid
+   from visualization import save_video_grid
    save_video_grid(videos, "results.png", prompts=prompts)
    ```
 

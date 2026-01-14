@@ -8,14 +8,14 @@ This script demonstrates how to visualize videos from the toy dataset.
 import sys
 from pathlib import Path
 
-# Add root directory to path so we can import tutorial module
-root_dir = Path(__file__).parent.parent.parent
+# Add root directory to path
+root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 # Also add original_impl if needed
 sys.path.insert(0, str(root_dir / "original_impl"))
 
-from tutorial.data import ToyDataset
-from tutorial.visualization import (
+from data import ToyDataset
+from visualization import (
     save_video_grid,
     create_video_gif,
     display_video,
@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 
 def visualize_toy_dataset(
     num_samples: int = 6,
-    output_dir: str = "tutorial/outputs/toy_dataset_visualization"
+    output_dir: str = "outputs/toy_dataset_visualization"
 ):
     """
     Visualize toy dataset videos.
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_samples", type=int, default=6,
                        help="Number of samples to visualize")
     parser.add_argument("--output_dir", type=str,
-                       default="tutorial/outputs/toy_dataset_visualization",
+                       default="outputs/toy_dataset_visualization",
                        help="Output directory for visualizations")
     parser.add_argument("--single", type=int, default=None,
                        help="Visualize a single video by index")

@@ -17,18 +17,18 @@ This guide provides all the commands needed to train, generate, evaluate, and vi
 ### Basic Training Command
 
 ```bash
-python tutorial/training/train_tutorial.py --num_epochs 5 --batch_size 2
+python train_tutorial.py --num_epochs 5 --batch_size 2
 ```
 
 ### Full Training Command with All Options
 
 ```bash
-python tutorial/training/train_tutorial.py \
+python train_tutorial.py \
     --num_epochs 5 \
     --batch_size 2 \
     --lr 1e-4 \
     --num_samples 20 \
-    --log_dir tutorial/logs/training \
+    --log_dir logs/training \
     --save_interval 10 \
     --log_interval 5 \
     --device cuda
@@ -42,7 +42,7 @@ python tutorial/training/train_tutorial.py \
 | `--batch_size` | int | 2 | Batch size for training |
 | `--lr` | float | 1e-4 | Learning rate |
 | `--num_samples` | int | 20 | Number of training samples in toy dataset |
-| `--log_dir` | str | tutorial/logs/training | Directory to save logs and checkpoints |
+| `--log_dir` | str | logs/training | Directory to save logs and checkpoints |
 | `--save_interval` | int | 10 | Save checkpoint every N steps |
 | `--log_interval` | int | 5 | Log metrics every N steps |
 | `--device` | str | cuda/cpu | Device to use (auto-detects CUDA if available) |
@@ -58,10 +58,10 @@ After training, you'll find:
 
 ```bash
 # Quick training run (5 epochs, 2 samples per batch)
-python tutorial/training/train_tutorial.py --num_epochs 5 --batch_size 2 --num_samples 20
+python train_tutorial.py --num_epochs 5 --batch_size 2 --num_samples 20
 
 # Longer training run
-python tutorial/training/train_tutorial.py --num_epochs 20 --batch_size 4 --num_samples 100 --log_dir tutorial/logs/long_training
+python train_tutorial.py --num_epochs 20 --batch_size 4 --num_samples 100 --log_dir .logs/long_training
 ```
 
 ---
@@ -71,17 +71,17 @@ python tutorial/training/train_tutorial.py --num_epochs 20 --batch_size 4 --num_
 ### Visualize Multiple Videos from Toy Dataset
 
 ```bash
-python tutorial/visualization/visualize_toy_dataset.py \
+python .visualization/visualize_toy_dataset.py \
     --num_samples 6 \
-    --output_dir tutorial/outputs/toy_dataset_visualization
+    --output_dir outputs/toy_dataset_visualization
 ```
 
 ### Visualize a Single Video
 
 ```bash
-python tutorial/visualization/visualize_toy_dataset.py \
+python .visualization/visualize_toy_dataset.py \
     --single 0 \
-    --output_dir tutorial/outputs/toy_dataset_visualization
+    --output_dir outputs/toy_dataset_visualization
 ```
 
 ### Visualization Arguments
@@ -89,7 +89,7 @@ python tutorial/visualization/visualize_toy_dataset.py \
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `--num_samples` | int | 6 | Number of videos to visualize |
-| `--output_dir` | str | tutorial/outputs/toy_dataset_visualization | Output directory for visualizations |
+| `--output_dir` | str | outputs/toy_dataset_visualization | Output directory for visualizations |
 | `--single` | int | None | Visualize a single video by index (optional) |
 
 ### Visualization Output
@@ -104,8 +104,8 @@ The script generates:
 You can also use visualization functions directly in Python:
 
 ```python
-from tutorial.visualization import save_video_grid, create_video_gif
-from tutorial.data import ToyDataset
+from visualization import save_video_grid, create_video_gif
+from data import ToyDataset
 
 # Load dataset
 dataset = ToyDataset(num_samples=9)
@@ -129,8 +129,8 @@ for i, video in enumerate(videos):
 Currently, evaluation is done via Python code. Create a script or use interactive Python:
 
 ```python
-from tutorial.evaluation import compute_all_metrics
-from tutorial.data import ToyDataset
+from evaluation import compute_all_metrics
+from data import ToyDataset
 
 # Load videos and prompts
 dataset = ToyDataset(num_samples=10)
@@ -160,7 +160,7 @@ The `compute_all_metrics` function computes:
 ### Individual Metric Usage
 
 ```python
-from tutorial.evaluation import (
+from evaluation import (
     FrameConsistencyMetric,
     CLIPScoreMetric,
     VisualQualityMetric,
@@ -188,8 +188,8 @@ fps = speed_metric.compute_fps(num_frames=16, generation_time=2.5)
 ### Evaluation with Ground Truth
 
 ```python
-from tutorial.evaluation import compute_all_metrics
-from tutorial.data import ToyDataset
+from evaluation import compute_all_metrics
+from data import ToyDataset
 
 # Generate dataset
 dataset = ToyDataset(num_samples=10)
@@ -214,9 +214,9 @@ print(results)
 ### Visualize Evaluation Results
 
 ```python
-from tutorial.visualization import plot_evaluation_results
-from tutorial.evaluation import compute_all_metrics
-from tutorial.data import ToyDataset
+from visualization import plot_evaluation_results
+from evaluation import compute_all_metrics
+from data import ToyDataset
 
 # Compute metrics
 dataset = ToyDataset(num_samples=10)
@@ -227,7 +227,7 @@ results = compute_all_metrics(videos, prompts)
 # Plot results
 plot_evaluation_results(
     results,
-    save_path="tutorial/logs/plots/evaluation_results.png"
+    save_path=".logs/plots/evaluation_results.png"
 )
 ```
 
@@ -241,9 +241,9 @@ Currently, generation/inference is done via Python code using the Self-Forcing p
 
 ```python
 import torch
-from tutorial.algorithm import SimplifiedSelfForcingPipeline
-from tutorial.model import TinyCausalWanModel
-from tutorial.training.train_tutorial import SimpleScheduler, SimpleTextEncoder
+from algorithm import SimplifiedSelfForcingPipeline
+from model import TinyCausalWanModel
+from train_tutorial import SimpleScheduler, SimpleTextEncoder
 
 # Setup device
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -263,7 +263,7 @@ generator = TinyCausalWanModel(
 ).to(device)
 
 # Load checkpoint (if available)
-# checkpoint = torch.load("tutorial/logs/training/checkpoints/checkpoint_epoch_5.pth")
+# checkpoint = torch.load("logs/training/checkpoints/checkpoint_epoch_5.pth")
 # generator.load_state_dict(checkpoint["generator_state_dict"])
 
 # Create scheduler
@@ -294,7 +294,7 @@ with torch.no_grad():
     generated_video = pipeline.simulate_inference(noise, conditional_dict)
 
 # Save generated video
-from tutorial.visualization import create_video_gif
+from visualization import create_video_gif
 create_video_gif(generated_video[0], "outputs/generated_video.gif", fps=8)
 ```
 
@@ -338,16 +338,16 @@ for i, video in enumerate(generated_videos):
 
 ```bash
 # 1. Train the model
-python tutorial/training/train_tutorial.py \
+python train_tutorial.py \
     --num_epochs 10 \
     --batch_size 2 \
     --num_samples 50 \
-    --log_dir tutorial/logs/my_training
+    --log_dir .logs/my_training
 
 # 2. Visualize training dataset
-python tutorial/visualization/visualize_toy_dataset.py \
+python .visualization/visualize_toy_dataset.py \
     --num_samples 9 \
-    --output_dir tutorial/outputs/dataset_viz
+    --output_dir outputs/dataset_viz
 
 # 3. Evaluate (create eval.py script)
 python eval.py
@@ -362,8 +362,8 @@ python generate.py
 #!/usr/bin/env python3
 """Evaluate videos from toy dataset."""
 
-from tutorial.evaluation import compute_all_metrics, plot_evaluation_results
-from tutorial.data import ToyDataset
+from evaluation import compute_all_metrics, plot_evaluation_results
+from data import ToyDataset
 
 def main():
     # Load dataset
@@ -385,9 +385,9 @@ def main():
     # Plot results
     plot_evaluation_results(
         results,
-        save_path="tutorial/logs/plots/evaluation_results.png"
+        save_path=".logs/plots/evaluation_results.png"
     )
-    print("\nPlot saved to tutorial/logs/plots/evaluation_results.png")
+    print("\nPlot saved to .logs/plots/evaluation_results.png")
 
 if __name__ == "__main__":
     main()
@@ -406,10 +406,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "original_impl"))
 
-from tutorial.algorithm import SimplifiedSelfForcingPipeline
-from tutorial.model import TinyCausalWanModel
-from tutorial.training.train_tutorial import SimpleScheduler, SimpleTextEncoder
-from tutorial.visualization import create_video_gif, save_video_grid
+from algorithm import SimplifiedSelfForcingPipeline
+from model import TinyCausalWanModel
+from train_tutorial import SimpleScheduler, SimpleTextEncoder
+from visualization import create_video_gif, save_video_grid
 
 def main():
     parser = argparse.ArgumentParser(description="Generate videos")
@@ -418,7 +418,7 @@ def main():
                        default=["A red circle moving horizontally"],
                        help="Text prompts")
     parser.add_argument("--num_frames", type=int, default=9, help="Number of frames")
-    parser.add_argument("--output_dir", type=str, default="tutorial/outputs/generated",
+    parser.add_argument("--output_dir", type=str, default="outputs/generated",
                        help="Output directory")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     
@@ -492,9 +492,9 @@ python generate.py
 python generate.py --prompts "A red circle" "A blue square" "A green triangle"
 
 # Generate with checkpoint
-python generate.py --checkpoint tutorial/logs/training/checkpoints/checkpoint_epoch_10.pth \
+python generate.py --checkpoint logs/training/checkpoints/checkpoint_epoch_10.pth \
     --prompts "A red circle moving horizontally" \
-    --output_dir tutorial/outputs/my_generations
+    --output_dir outputs/my_generations
 ```
 
 ---
@@ -518,7 +518,7 @@ pip install git+https://github.com/openai/CLIP.git
 After running commands, you'll typically have:
 
 ```
-tutorial/
+.
 ├── logs/
 │   ├── training/
 │   │   ├── checkpoints/          # Model checkpoints
@@ -552,6 +552,6 @@ tutorial/
 
 ### Getting Help
 
-- Check `tutorial/README.md` for more details
-- See `tutorial/QUICK_START.md` for quick examples
-- Review `tutorial/algorithm/README.md` for algorithm details
+- Check `.README.md` for more details
+- See `.QUICK_START.md` for quick examples
+- Review `.algorithm/README.md` for algorithm details

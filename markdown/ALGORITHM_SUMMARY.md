@@ -74,13 +74,13 @@ Complete demonstration showing:
 
 ### Understand the Algorithm
 ```python
-from tutorial.algorithm import explain_self_forcing
+from algorithm import explain_self_forcing
 print(explain_self_forcing())
 ```
 
 ### Use the Pipeline
 ```python
-from tutorial.algorithm import SimplifiedSelfForcingPipeline
+from algorithm import SimplifiedSelfForcingPipeline
 
 pipeline = SimplifiedSelfForcingPipeline(
     generator=your_model,
@@ -94,7 +94,7 @@ generated_video = pipeline.simulate_inference(noise, conditional_dict)
 
 ### Visualize Algorithm
 ```python
-from tutorial.algorithm import create_algorithm_diagram, visualize_kv_cache_growth
+from algorithm import create_algorithm_diagram, visualize_kv_cache_growth
 
 create_algorithm_diagram("outputs/diagram.png")
 visualize_kv_cache_growth(cache_sizes, "outputs/cache_growth.png")

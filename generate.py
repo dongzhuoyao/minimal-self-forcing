@@ -2,7 +2,7 @@
 Generate videos using a trained checkpoint.
 
 Usage:
-    python tutorial/generate.py --checkpoint tutorial/logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
+    python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
 """
 
 import torch
@@ -14,10 +14,10 @@ import sys
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
-from tutorial.algorithm import SimplifiedSelfForcingPipeline
-from tutorial.model import TinyCausalWanModel
-from tutorial.training.train_tutorial import SimpleScheduler, SimpleTextEncoder
-from tutorial.visualization import create_video_gif, save_video_grid
+from algorithm import SimplifiedSelfForcingPipeline
+from model import TinyCausalWanModel
+from train_tutorial import SimpleScheduler, SimpleTextEncoder
+from visualization import create_video_gif, save_video_grid
 
 
 def main():
@@ -25,7 +25,7 @@ def main():
     parser.add_argument(
         "--checkpoint", 
         type=str, 
-        default="tutorial/logs/training/checkpoint_final.pt",
+        default="logs/training/checkpoint_final.pt",
         help="Path to checkpoint file"
     )
     parser.add_argument(
@@ -44,7 +44,7 @@ def main():
     parser.add_argument(
         "--output_dir", 
         type=str, 
-        default="tutorial/outputs/generated",
+        default="outputs/generated",
         help="Output directory for generated videos"
     )
     parser.add_argument(

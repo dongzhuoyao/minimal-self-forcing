@@ -3,20 +3,20 @@
 ## 1. Generate Toy Dataset
 
 ```python
-from tutorial.data import ToyDataset
+from data import ToyDataset
 
 # Create 10 synthetic videos
 dataset = ToyDataset(num_samples=10, width=256, height=256, num_frames=16)
 
 # Save prompts for training
-dataset.save_prompts("tutorial/data/prompts/toy_prompts.txt")
+dataset.save_prompts("data/prompts/toy_prompts.txt")
 ```
 
 ## 2. Visualize Videos
 
 ```python
-from tutorial.visualization import save_video_grid, create_video_gif
-from tutorial.data import ToyDataset
+from visualization import save_video_grid, create_video_gif
+from data import ToyDataset
 
 dataset = ToyDataset(num_samples=9)
 videos = [dataset[i]["video"] for i in range(9)]
@@ -33,8 +33,8 @@ for i, video in enumerate(videos):
 ## 3. Evaluate Videos
 
 ```python
-from tutorial.evaluation import compute_all_metrics
-from tutorial.data import ToyDataset
+from evaluation import compute_all_metrics
+from data import ToyDataset
 
 dataset = ToyDataset(num_samples=10)
 videos = [dataset[i]["video"] for i in range(10)]
@@ -50,20 +50,20 @@ The tutorial components can be used alongside the original Self-Forcing codebase
 
 1. **Generate prompts for training:**
    ```python
-   from tutorial.data import ToyDataset
+   from data import ToyDataset
    dataset = ToyDataset(num_samples=1000)
    dataset.save_prompts("prompts/toy_prompts.txt")
    ```
 
 2. **Evaluate after inference:**
    ```python
-   from tutorial.evaluation import compute_all_metrics
+   from evaluation import compute_all_metrics
    results = compute_all_metrics(generated_videos, prompts)
    ```
 
 3. **Visualize training progress:**
    ```python
-   from tutorial.visualization import TrainingPlotter
+   from visualization import TrainingPlotter
    plotter = TrainingPlotter()
    plotter.log_metric("loss", loss_value, step)
    plotter.plot_metric("loss")

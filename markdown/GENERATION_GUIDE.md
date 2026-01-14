@@ -10,7 +10,7 @@ Generate a video with a single prompt:
 
 ```bash
 conda activate sf
-python tutorial/generate.py --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A red circle moving horizontally"
 ```
 
@@ -19,8 +19,8 @@ python tutorial/generate.py --checkpoint tutorial/logs/training/checkpoint_final
 Generate multiple videos with different prompts:
 
 ```bash
-python tutorial/generate.py \
-    --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py \
+    --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A red circle moving horizontally" \
               "A blue square rotating clockwise" \
               "A green triangle bouncing"
@@ -29,20 +29,20 @@ python tutorial/generate.py \
 ### Customize Generation
 
 ```bash
-python tutorial/generate.py \
-    --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py \
+    --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A yellow ball bouncing" \
     --num_frames 12 \
-    --output_dir tutorial/outputs/my_generations \
+    --output_dir outputs/my_generations \
     --seed 123
 ```
 
 ## Command Line Arguments
 
-- `--checkpoint`: Path to checkpoint file (default: `tutorial/logs/training/checkpoint_final.pt`)
+- `--checkpoint`: Path to checkpoint file (default: `logs/training/checkpoint_final.pt`)
 - `--prompts`: One or more text prompts (default: `["A red circle moving horizontally"]`)
 - `--num_frames`: Number of frames to generate, must be divisible by `num_frames_per_block` (default: `9`)
-- `--output_dir`: Directory to save generated videos (default: `tutorial/outputs/generated`)
+- `--output_dir`: Directory to save generated videos (default: `outputs/generated`)
 - `--device`: Device to use - `cuda` or `cpu` (default: `cuda` if available)
 - `--num_frames_per_block`: Frames per block for autoregressive generation (default: `3`)
 - `--seed`: Random seed for reproducibility (default: `42`)
@@ -53,8 +53,8 @@ python tutorial/generate.py \
 
 ```bash
 # Use the final checkpoint from training
-python tutorial/generate.py \
-    --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py \
+    --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A red circle moving horizontally"
 ```
 
@@ -62,7 +62,7 @@ python tutorial/generate.py \
 
 ```bash
 # Use a checkpoint from a specific training step
-python tutorial/generate.py \
+python generate.py \
     --checkpoint tutorial/logs/training/checkpoint_step_000050.pt \
     --prompts "A blue square rotating" \
     --num_frames 9
@@ -72,8 +72,8 @@ python tutorial/generate.py \
 
 ```bash
 # Generate 21 frames (7 blocks × 3 frames per block)
-python tutorial/generate.py \
-    --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py \
+    --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A green triangle moving diagonally" \
     --num_frames 21
 ```
@@ -82,8 +82,8 @@ python tutorial/generate.py \
 
 ```bash
 # Use a specific seed for reproducible results
-python tutorial/generate.py \
-    --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py \
+    --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A yellow ball bouncing" \
     --seed 42
 ```
@@ -119,7 +119,7 @@ If you get a "checkpoint not found" error:
 ls tutorial/logs/training/checkpoint_*.pt
 
 # Use an available checkpoint
-python tutorial/generate.py --checkpoint tutorial/logs/training/checkpoint_step_000010.pt ...
+python generate.py --checkpoint tutorial/logs/training/checkpoint_step_000010.pt ...
 ```
 
 ### CUDA Out of Memory
@@ -128,10 +128,10 @@ If you run out of GPU memory:
 
 ```bash
 # Use CPU instead (slower but works)
-python tutorial/generate.py --device cpu --prompts "A red circle" ...
+python generate.py --device cpu --prompts "A red circle" ...
 
 # Or reduce batch size by generating one video at a time
-python tutorial/generate.py --prompts "A red circle" ...
+python generate.py --prompts "A red circle" ...
 ```
 
 ### Invalid Number of Frames
@@ -140,7 +140,7 @@ python tutorial/generate.py --prompts "A red circle" ...
 
 ```bash
 # Valid: 9, 12, 15, 18, 21, etc.
-python tutorial/generate.py --num_frames 12 ...
+python generate.py --num_frames 12 ...
 
 # Invalid: 10, 11, 13, etc. (not divisible by 3)
 ```
@@ -158,10 +158,10 @@ After training, you can immediately generate videos:
 
 ```bash
 # Train for a few epochs
-python tutorial/training/train_tutorial.py --num_epochs 5 --batch_size 2
+python train_tutorial.py --num_epochs 5 --batch_size 2
 
 # Generate videos with the trained model
-python tutorial/generate.py \
-    --checkpoint tutorial/logs/training/checkpoint_final.pt \
+python generate.py \
+    --checkpoint logs/training/checkpoint_final.pt \
     --prompts "A red circle moving horizontally"
 ```

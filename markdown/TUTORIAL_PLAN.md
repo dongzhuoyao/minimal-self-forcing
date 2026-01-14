@@ -133,8 +133,8 @@ tutorial/
 
 ### Training
 ```python
-from tutorial.training import train_tutorial
-from tutorial.data import ToyDataset
+import train_tutorial
+from data import ToyDataset
 
 dataset = ToyDataset(num_samples=100)
 train_tutorial(dataset, config_path="configs/tutorial_config.yaml")
@@ -142,8 +142,8 @@ train_tutorial(dataset, config_path="configs/tutorial_config.yaml")
 
 ### Inference
 ```python
-from tutorial.inference import generate_video
-from tutorial.visualization import display_video
+from inference import generate_video
+from visualization import display_video
 
 video = generate_video("A red circle moving left to right")
 display_video(video)
@@ -151,7 +151,7 @@ display_video(video)
 
 ### Evaluation
 ```python
-from tutorial.evaluation import evaluate_videos
+from evaluation import evaluate_videos
 
 results = evaluate_videos(
     videos=generated_videos,

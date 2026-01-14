@@ -11,17 +11,15 @@ import argparse
 from pathlib import Path
 import sys
 
-# Add root directory to path so we can import tutorial
-root_dir = Path(__file__).parent.parent.parent
+# Add root directory to path
+root_dir = Path(__file__).parent
 sys.path.insert(0, str(root_dir))
-# Add original_impl directory to path
-sys.path.insert(0, str(root_dir / "original_impl"))
 
-from tutorial.training.trainer import SimplifiedTrainer
-from tutorial.data import ToyDataset
-from tutorial.visualization import TrainingPlotter
-from tutorial.algorithm import SimplifiedSelfForcingPipeline
-from tutorial.model import TinyCausalWanModel
+
+from trainer import SimplifiedTrainer
+from data import ToyDataset
+from visualization import TrainingPlotter
+from model import TinyCausalWanModel
 
 
 class SimpleScheduler:
@@ -70,7 +68,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--num_samples", type=int, default=20, help="Number of training samples")
-    parser.add_argument("--log_dir", type=str, default="tutorial/logs/training", help="Log directory")
+    parser.add_argument("--log_dir", type=str, default="logs/training", help="Log directory")
     parser.add_argument("--save_interval", type=int, default=10, help="Save checkpoint every N steps")
     parser.add_argument("--log_interval", type=int, default=5, help="Log metrics every N steps")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device")

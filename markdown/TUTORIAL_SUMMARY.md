@@ -92,21 +92,21 @@ tutorial/
 
 ### Generate Toy Dataset
 ```python
-from tutorial.data import ToyDataset
+from data import ToyDataset
 dataset = ToyDataset(num_samples=100)
 dataset.save_prompts("prompts/toy_prompts.txt")
 ```
 
 ### Visualize Videos
 ```python
-from tutorial.visualization import save_video_grid, create_video_gif
+from visualization import save_video_grid, create_video_gif
 save_video_grid(videos, "grid.png", prompts=prompts)
 create_video_gif(video, "output.gif", fps=8)
 ```
 
 ### Evaluate Videos
 ```python
-from tutorial.evaluation import compute_all_metrics
+from evaluation import compute_all_metrics
 results = compute_all_metrics(videos, prompts)
 ```
 
