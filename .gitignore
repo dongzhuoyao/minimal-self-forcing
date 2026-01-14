@@ -12,3 +12,4 @@ __pycache__
 logs/training/metrics.json
 logs/training/metrics_history.json
 logs/training/plots/loss.png
+logs/training/samples/

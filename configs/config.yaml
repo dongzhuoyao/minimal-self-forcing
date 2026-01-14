@@ -35,7 +35,7 @@ training:
   context_noise: 0            # Noise level for cache update
   
   # Training control
-  save_interval: 50           # Save checkpoint every N steps
+  save_interval: 100           # Save checkpoint every N steps
   log_interval: 5             # Log metrics every N steps
   viz_interval: 100           # Generate sample videos every N steps
   
