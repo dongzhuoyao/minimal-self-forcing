@@ -41,10 +41,18 @@ training:
   viz_interval: 100           # Generate sample videos every N steps
   
   # Dataset
-  num_samples: 20             # Number of training samples in toy dataset
+  num_samples: 20             # Number of training samples in dataset
   video_height: 64            # Video height for training
   video_width: 64             # Video width for training
   video_frames: 9             # Number of frames per video in dataset
+
+# Dataset Configuration
+dataset:
+  type: "toy"                # Dataset type: "toy" or "moving_mnist"
+  # Moving MNIST specific settings (only used when type="moving_mnist")
+  num_digits: 1              # Number of digits per video (1 or 2)
+  digit_size: 64             # Size of MNIST digit
+  max_velocity: 2.0           # Maximum velocity for digit movement
 
 # Generation/Inference Hyperparameters
 generation:

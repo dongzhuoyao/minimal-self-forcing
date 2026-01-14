@@ -17,6 +17,7 @@ import os
 import numpy as np
 
 from toy_dataset import ToyDataset
+from moving_mnist import MovingMNISTDataset
 from visualization import TrainingPlotter, create_video_gif, save_video_grid
 from tiny_causal_wan import TinyCausalWanModel
 
@@ -995,6 +996,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size (overrides config)")
     parser.add_argument("--lr", type=float, default=None, help="Learning rate (overrides config)")
     parser.add_argument("--num_samples", type=int, default=None, help="Number of training samples (overrides config)")
+    parser.add_argument("--dataset", type=str, default=None, choices=['toy', 'moving_mnist'], help="Dataset type: 'toy' or 'moving_mnist' (overrides config)")
     parser.add_argument("--log_dir", type=str, default=None, help="Log directory (overrides config)")
     parser.add_argument("--save_interval", type=int, default=None, help="Save checkpoint every N steps (overrides config)")
     parser.add_argument("--log_interval", type=int, default=None, help="Log metrics every N steps (overrides config)")
@@ -1098,13 +1100,38 @@ def main():
     print("=" * 70)
     
     # Create dataset
-    print("\n1. Creating toy dataset...")
-    dataset = ToyDataset(
-        num_samples=num_samples,
-        width=video_width,
-        height=video_height,
-        num_frames=video_frames
-    )
+    dataset_cfg = config.get('dataset', {})
+    # Command-line argument overrides config
+    dataset_type = getattr(args, 'dataset', None) or dataset_cfg.get('type', 'toy')
+    dataset_type = dataset_type.lower()
+    
+    print(f"\n1. Creating {dataset_type} dataset...")
+    
+    if dataset_type == 'moving_mnist':
+        # Moving MNIST dataset configuration
+        num_digits = dataset_cfg.get('num_digits', 1)
+        digit_size = dataset_cfg.get('digit_size', 64)
+        max_velocity = dataset_cfg.get('max_velocity', 2.0)
+        
+        dataset = MovingMNISTDataset(
+            num_samples=num_samples,
+            width=video_width,
+            height=video_height,
+            num_frames=video_frames,
+            seed=seed,
+            num_digits=num_digits,
+            digit_size=digit_size,
+            max_velocity=max_velocity
+        )
+    else:  # Default to 'toy'
+        dataset = ToyDataset(
+            num_samples=num_samples,
+            width=video_width,
+            height=video_height,
+            num_frames=video_frames,
+            seed=seed
+        )
+    
     print(f"   Created {len(dataset)} samples")
     
     # Create dataloader
