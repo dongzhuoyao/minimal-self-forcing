@@ -191,7 +191,6 @@ class SelfForcingEngine:
     def compute_self_forcing_loss(
         self,
         generated_video: torch.Tensor,
-        prompts: List[str],
         conditional_dict: Optional[Dict[str, torch.Tensor]] = None,
         use_dmd: bool = True
     ) -> torch.Tensor:
@@ -203,7 +202,6 @@ class SelfForcingEngine:
         
         Args:
             generated_video: Generated video tensor [B, F, C, H, W]
-            prompts: List of text prompts
             conditional_dict: Conditional information (text embeddings)
             use_dmd: If True, use DMD loss; if False, use simplified temporal loss
             
@@ -211,23 +209,15 @@ class SelfForcingEngine:
             Loss tensor
         """
         if use_dmd:
-            return self.compute_dmd_loss(generated_video, conditional_dict, prompts)
+            return self.compute_dmd_loss(generated_video, conditional_dict)
         else:
-            # Fallback: simplified temporal consistency loss
-            temporal_loss = 0.0
-            for t in range(generated_video.shape[1] - 1):
-                frame_diff = generated_video[:, t+1] - generated_video[:, t]
-                temporal_loss += torch.mean(frame_diff ** 2)
-            temporal_loss = temporal_loss / (generated_video.shape[1] - 1)
-            
-            reg_loss = torch.mean(generated_video ** 2)
-            return temporal_loss + 0.1 * reg_loss
+            raise ValueError("use_dmd must be True")
     
     def compute_dmd_loss(
         self,
         generated_video: torch.Tensor,
         conditional_dict: Optional[Dict[str, torch.Tensor]],
-        prompts: List[str]
+        embed_key: str = "prompt_embeds"
     ) -> torch.Tensor:
         """
         Compute DMD (Distribution Matching Distillation) loss.
@@ -253,8 +243,7 @@ class SelfForcingEngine:
         # Create unconditional dict (null/empty embeddings)
         assert conditional_dict is not None, "conditional_dict is None"
         
-        # Get the correct key name (text encoder uses "prompt_embeds")
-        embed_key = "prompt_embeds"
+        
         
         unconditional_dict = {
             embed_key: torch.zeros_like(conditional_dict[embed_key])
@@ -357,8 +346,8 @@ def demo_single_forward():
     batch_size = 2
     num_frames = 9  # Must be divisible by 3 (num_frames_per_block)
     channels = 3
-    height = 64
-    width = 64
+    height = 32
+    width = 32
     
     print(f"\n2. Model Configuration:")
     print(f"   Batch size: {batch_size}")
@@ -430,12 +419,10 @@ def demo_single_forward():
     
     # Compute loss
     print(f"\n7. Computing Self-Forcing loss...")
-    prompts = ["A red circle moving horizontally"] * batch_size
     generator.train()  # Set to train mode for loss computation
     
     loss = sf_engine.compute_self_forcing_loss(
         generated_video,
-        prompts,
         conditional_dict=conditional_dict,
         use_dmd=True
     )

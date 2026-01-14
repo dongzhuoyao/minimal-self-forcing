@@ -189,7 +189,6 @@ class SimplifiedTrainer:
         # Uses DMD (Distribution Matching Distillation) for distribution matching.
         loss = self.sf_engine.compute_self_forcing_loss(
             generated_video, 
-            prompts,
             conditional_dict=conditional_dict,
             use_dmd=self.use_dmd_loss
         )
