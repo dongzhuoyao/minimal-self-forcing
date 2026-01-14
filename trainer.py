@@ -485,11 +485,14 @@ class SimplifiedTrainer:
         self._save_metrics()
     
     def _log_metrics(self, metrics: Dict[str, float]):
-        """Log metrics to console and optionally to wandb."""
+        """Log metrics to console and optionally to wandb.
+        
+        Both console and wandb logging happen at log_interval.
+        """
         if self.step % self.log_interval == 0:
             print(f"Step {self.step}: Loss = {metrics['loss']:.8f}")
             
-            # Log to wandb
+            # Log to wandb at log_interval
             if self.use_wandb:
                 wandb.log(metrics, step=self.step)
     
@@ -598,10 +601,11 @@ class SimplifiedTrainer:
                 }, step=self.step)
                 
                 # Log individual videos as GIFs
+                # Note: fps parameter is not needed for GIF files (frame rate is encoded in the file)
                 for i, (video_tensor, prompt) in enumerate(zip(videos_list, sample_prompts)):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                     wandb.log({
-                        f"samples/video_{i}": wandb.Video(str(gif_path), fps=8, format="gif"),
+                        f"samples/video_{i}": wandb.Video(str(gif_path), format="gif"),
                         f"samples/prompt_{i}": prompt
                     }, step=self.step)
         
@@ -1014,13 +1018,13 @@ def main():
         # Log to plotter
         plotter.log_metric("loss", metrics["loss"], trainer.step)
         
+        # Log metrics (console + wandb) at log_interval
+        if trainer.step % args.log_interval == 0:
+            trainer._log_metrics(metrics)
+        
         # Update progress bar
         pbar.set_postfix({"loss": f"{metrics['loss']:.8f}", "step": trainer.step})
         pbar.update(1)
-        
-        # Print progress
-        if trainer.step % args.log_interval == 0:
-            print(f"Step {trainer.step}: Loss = {metrics['loss']:.8f}")
         
         # Save checkpoint
         if trainer.step % args.save_interval == 0:
