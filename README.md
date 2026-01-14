@@ -173,7 +173,7 @@ trainer = SimplifiedTrainer(
     scheduler=scheduler,
     loss_fn=loss_fn
 )
-trainer.train(dataloader, num_epochs=10)
+trainer.train(dataloader, num_steps=10000)
 ```
 
 ### 3. Visualization (`visualization/`)
@@ -197,7 +197,7 @@ create_video_gif(video, "output.gif", fps=8)
 ### Run Training Example
 
 ```bash
-python trainer.py --num_epochs 5 --batch_size 2
+python trainer.py --num_steps 10000
 ```
 
 This demonstrates:

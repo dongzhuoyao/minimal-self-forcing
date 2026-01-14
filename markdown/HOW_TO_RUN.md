@@ -17,15 +17,15 @@ This guide provides all the commands needed to train, generate, evaluate, and vi
 ### Basic Training Command
 
 ```bash
-python trainer.py --num_epochs 5 --batch_size 2
+python trainer.py --num_steps 10000
 ```
 
 ### Full Training Command with All Options
 
 ```bash
 python trainer.py \
-    --num_epochs 5 \
-    --batch_size 2 \
+    --num_steps 10000 \
+    --batch_size 64 \
     --lr 1e-4 \
     --num_samples 20 \
     --log_dir logs/training \
@@ -38,8 +38,8 @@ python trainer.py \
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `--num_epochs` | int | 5 | Number of training epochs |
-| `--batch_size` | int | 2 | Batch size for training |
+| `--num_steps` | int | 10000 | Number of training steps |
+| `--batch_size` | int | 64 | Batch size for training |
 | `--lr` | float | 1e-4 | Learning rate |
 | `--num_samples` | int | 20 | Number of training samples in toy dataset |
 | `--log_dir` | str | logs/training | Directory to save logs and checkpoints |
@@ -57,11 +57,14 @@ After training, you'll find:
 ### Example Training Session
 
 ```bash
-# Quick training run (5 epochs, 2 samples per batch)
-python trainer.py --num_epochs 5 --batch_size 2 --num_samples 20
+# Quick training run (1000 steps)
+python trainer.py --num_steps 1000 --num_samples 20
 
-# Longer training run
-python trainer.py --num_epochs 20 --batch_size 4 --num_samples 100 --log_dir .logs/long_training
+# Standard training run (10000 steps, default batch_size=64)
+python trainer.py --num_steps 10000 --num_samples 20
+
+# Longer training run (50000 steps)
+python trainer.py --num_steps 50000 --batch_size 64 --num_samples 100 --log_dir logs/long_training
 ```
 
 ---
@@ -263,7 +266,7 @@ generator = TinyCausalWanModel(
 ).to(device)
 
 # Load checkpoint (if available)
-# checkpoint = torch.load("logs/training/checkpoints/checkpoint_epoch_5.pth")
+# checkpoint = torch.load("logs/training/checkpoint_step_000010.pt")
 # generator.load_state_dict(checkpoint["generator_state_dict"])
 
 # Create scheduler
@@ -339,8 +342,8 @@ for i, video in enumerate(generated_videos):
 ```bash
 # 1. Train the model
 python trainer.py \
-    --num_epochs 10 \
-    --batch_size 2 \
+    --num_steps 10000 \
+    --batch_size 64 \
     --num_samples 50 \
     --log_dir .logs/my_training
 
@@ -492,7 +495,7 @@ python generate.py
 python generate.py --prompts "A red circle" "A blue square" "A green triangle"
 
 # Generate with checkpoint
-python generate.py --checkpoint logs/training/checkpoints/checkpoint_epoch_10.pth \
+python generate.py --checkpoint logs/training/checkpoint_step_000010.pt \
     --prompts "A red circle moving horizontally" \
     --output_dir outputs/my_generations
 ```

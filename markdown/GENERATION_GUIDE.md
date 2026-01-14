@@ -157,8 +157,8 @@ python generate.py --num_frames 12 ...
 After training, you can immediately generate videos:
 
 ```bash
-# Train for a few epochs
-python trainer.py --num_epochs 5 --batch_size 2
+# Train for a few steps
+python trainer.py --num_steps 10000
 
 # Generate videos with the trained model
 python generate.py \

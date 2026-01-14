@@ -61,7 +61,6 @@ class SimplifiedTrainer:
         
         # Training state
         self.step = 0
-        self.epoch = 0
         self.metrics_history = {
             "loss": [],
             "step": []
@@ -336,7 +335,7 @@ class SimplifiedTrainer:
     def train(
         self,
         dataloader: DataLoader,
-        num_epochs: int = 10,
+        num_steps: int = 10000,
         text_encoder: Optional[nn.Module] = None
     ):
         """
@@ -344,10 +343,10 @@ class SimplifiedTrainer:
         
         Args:
             dataloader: DataLoader for training data
-            num_epochs: Number of epochs to train
+            num_steps: Number of training steps to perform
             text_encoder: Optional text encoder for encoding prompts
         """
-        print(f"Starting training for {num_epochs} epochs...")
+        print(f"Starting training for {num_steps} steps...")
         print(f"Device: {self.device}")
         print(f"Log directory: {self.log_dir}")
         
@@ -368,37 +367,44 @@ class SimplifiedTrainer:
             
             text_encoder = DummyTextEncoder().to(self.device)
         
-        for epoch in range(num_epochs):
-            self.epoch = epoch
-            epoch_losses = []
-            
-            # Progress bar
-            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
-            
-            for batch_idx, batch in enumerate(pbar):
-                # Encode text prompts
-                with torch.no_grad():
-                    conditional_dict = text_encoder(batch["prompts"])
-                
-                # Training step
-                metrics = self.train_step(batch, conditional_dict)
-                epoch_losses.append(metrics["loss"])
-                
-                # Update progress bar
-                pbar.set_postfix({"loss": f"{metrics['loss']:.4f}"})
-                
-                # Logging
-                if self.step % self.log_interval == 0:
-                    self._log_metrics(metrics)
-                
-                # Save checkpoint
-                if self.step % self.save_interval == 0:
-                    self._save_checkpoint()
-            
-            # Epoch summary
-            avg_loss = sum(epoch_losses) / len(epoch_losses)
-            print(f"\nEpoch {epoch+1} completed. Average loss: {avg_loss:.4f}")
+        # Create iterator that cycles through dataloader
+        dataloader_iter = iter(dataloader)
         
+        # Progress bar
+        pbar = tqdm(range(num_steps), desc="Training")
+        
+        while self.step < num_steps:
+            try:
+                batch = next(dataloader_iter)
+            except StopIteration:
+                # Restart iterator if dataloader is exhausted
+                dataloader_iter = iter(dataloader)
+                batch = next(dataloader_iter)
+            
+            # Encode text prompts
+            with torch.no_grad():
+                conditional_dict = text_encoder(batch["prompts"])
+            
+            # Training step
+            metrics = self.train_step(batch, conditional_dict)
+            
+            # Update progress bar
+            pbar.set_postfix({"loss": f"{metrics['loss']:.4f}", "step": self.step})
+            pbar.update(1)
+            
+            # Logging
+            if self.step % self.log_interval == 0:
+                self._log_metrics(metrics)
+            
+            # Save checkpoint
+            if self.step % self.save_interval == 0:
+                self._save_checkpoint()
+            
+            # Check if we've reached the target number of steps
+            if self.step >= num_steps:
+                break
+        
+        pbar.close()
         print("\nTraining completed!")
         self._save_checkpoint(final=True)
         self._save_metrics()
@@ -412,7 +418,6 @@ class SimplifiedTrainer:
         """Save model checkpoint."""
         checkpoint = {
             "step": self.step,
-            "epoch": self.epoch,
             "generator_state_dict": self.generator.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "metrics_history": self.metrics_history
@@ -440,9 +445,8 @@ class SimplifiedTrainer:
         self.generator.load_state_dict(checkpoint["generator_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.step = checkpoint.get("step", 0)
-        self.epoch = checkpoint.get("epoch", 0)
         self.metrics_history = checkpoint.get("metrics_history", {"loss": [], "step": []})
-        print(f"Loaded checkpoint from {checkpoint_path}")
+        print(f"Loaded checkpoint from {checkpoint_path} (step {self.step})")
 
 
 class SimpleScheduler:
@@ -575,8 +579,8 @@ class SimpleTextEncoder(nn.Module):
 def main():
     """Main training script."""
     parser = argparse.ArgumentParser(description="Train Self-Forcing model (tutorial)")
-    parser.add_argument("--num_epochs", type=int, default=5, help="Number of epochs")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
+    parser.add_argument("--num_steps", type=int, default=10000, help="Number of training steps")
+    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--num_samples", type=int, default=20, help="Number of training samples")
     parser.add_argument("--log_dir", type=str, default="logs/training", help="Log directory")
@@ -658,35 +662,51 @@ def main():
     print("\n4. Starting training...")
     print("-" * 70)
     
-    for epoch in range(args.num_epochs):
-        epoch_losses = []
+    # Create iterator that cycles through dataloader
+    dataloader_iter = iter(dataloader)
+    
+    # Progress bar
+    pbar = tqdm(range(args.num_steps), desc="Training")
+    
+    while trainer.step < args.num_steps:
+        try:
+            batch = next(dataloader_iter)
+        except StopIteration:
+            # Restart iterator if dataloader is exhausted
+            dataloader_iter = iter(dataloader)
+            batch = next(dataloader_iter)
         
-        for batch_idx, batch in enumerate(dataloader):
-            # DataLoader batches "prompt" (singular) from dataset as a list
-            # Trainer expects "prompts" (plural), so rename it
-            batch["prompts"] = batch["prompt"]
-            
-            # Encode prompts
-            with torch.no_grad():
-                conditional_dict = text_encoder(batch["prompts"])
-            
-            # Training step
-            metrics = trainer.train_step(batch, conditional_dict)
-            epoch_losses.append(metrics["loss"])
-            
-            # Log to plotter
-            plotter.log_metric("loss", metrics["loss"], trainer.step)
-            
-            # Print progress
-            if trainer.step % args.log_interval == 0:
-                print(f"Step {trainer.step}: Loss = {metrics['loss']:.4f}")
+        # DataLoader batches "prompt" (singular) from dataset as a list
+        # Trainer expects "prompts" (plural), so rename it
+        batch["prompts"] = batch["prompt"]
         
-        # Epoch summary
-        avg_loss = sum(epoch_losses) / len(epoch_losses)
-        print(f"\nEpoch {epoch+1}/{args.num_epochs} completed. Average loss: {avg_loss:.4f}")
+        # Encode prompts
+        with torch.no_grad():
+            conditional_dict = text_encoder(batch["prompts"])
+        
+        # Training step
+        metrics = trainer.train_step(batch, conditional_dict)
+        
+        # Log to plotter
+        plotter.log_metric("loss", metrics["loss"], trainer.step)
+        
+        # Update progress bar
+        pbar.set_postfix({"loss": f"{metrics['loss']:.4f}", "step": trainer.step})
+        pbar.update(1)
+        
+        # Print progress
+        if trainer.step % args.log_interval == 0:
+            print(f"Step {trainer.step}: Loss = {metrics['loss']:.4f}")
         
         # Save checkpoint
-        trainer._save_checkpoint()
+        if trainer.step % args.save_interval == 0:
+            trainer._save_checkpoint()
+        
+        # Check if we've reached the target number of steps
+        if trainer.step >= args.num_steps:
+            break
+    
+    pbar.close()
     
     # Finalize
     print("\n5. Finalizing...")
