@@ -158,7 +158,7 @@ After training, you can immediately generate videos:
 
 ```bash
 # Train for a few steps
-python trainer.py --num_steps 10000
+python trainer.py --num_steps 1000
 
 # Generate videos with the trained model
 python generate.py \

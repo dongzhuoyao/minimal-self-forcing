@@ -17,14 +17,14 @@ This guide provides all the commands needed to train, generate, evaluate, and vi
 ### Basic Training Command
 
 ```bash
-python trainer.py --num_steps 10000
+python trainer.py --num_steps 1000
 ```
 
 ### Full Training Command with All Options
 
 ```bash
 python trainer.py \
-    --num_steps 10000 \
+    --num_steps 1000 \
     --batch_size 64 \
     --lr 1e-4 \
     --num_samples 20 \
@@ -38,7 +38,7 @@ python trainer.py \
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `--num_steps` | int | 10000 | Number of training steps |
+| `--num_steps` | int | 1000 | Number of training steps |
 | `--batch_size` | int | 64 | Batch size for training |
 | `--lr` | float | 1e-4 | Learning rate |
 | `--num_samples` | int | 20 | Number of training samples in toy dataset |
@@ -60,8 +60,8 @@ After training, you'll find:
 # Quick training run (1000 steps)
 python trainer.py --num_steps 1000 --num_samples 20
 
-# Standard training run (10000 steps, default batch_size=64)
-python trainer.py --num_steps 10000 --num_samples 20
+# Standard training run (1000 steps, default batch_size=16)
+python trainer.py --num_steps 1000 --num_samples 20
 
 # Longer training run (50000 steps)
 python trainer.py --num_steps 50000 --batch_size 64 --num_samples 100 --log_dir logs/long_training
@@ -342,7 +342,7 @@ for i, video in enumerate(generated_videos):
 ```bash
 # 1. Train the model
 python trainer.py \
-    --num_steps 10000 \
+    --num_steps 1000 \
     --batch_size 64 \
     --num_samples 50 \
     --log_dir .logs/my_training
