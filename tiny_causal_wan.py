@@ -38,15 +38,44 @@ def rope_apply(x, grid_sizes, freqs):
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
         seq_len = f * h * w
         
+        # Clamp dimensions to prevent index out of bounds
+        # freqs buffers support up to their length (typically 1024)
+        max_freq_len_t = freqs[0].shape[0]
+        max_freq_len_h = freqs[1].shape[0]
+        max_freq_len_w = freqs[2].shape[0]
+        
+        f_clamped = min(f, max_freq_len_t)
+        h_clamped = min(h, max_freq_len_h)
+        w_clamped = min(w, max_freq_len_w)
+        
         # Reshape to complex for rotation
         x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
             seq_len, n, -1, 2))
         
         # Create frequency multipliers for each dimension
+        # Handle dimensions that exceed buffer size by using modulo indexing
+        if f <= max_freq_len_t:
+            freqs_t = freqs[0][:f]
+        else:
+            indices_t = torch.arange(f, device=freqs[0].device) % max_freq_len_t
+            freqs_t = freqs[0][indices_t]
+        
+        if h <= max_freq_len_h:
+            freqs_h = freqs[1][:h]
+        else:
+            indices_h = torch.arange(h, device=freqs[1].device) % max_freq_len_h
+            freqs_h = freqs[1][indices_h]
+        
+        if w <= max_freq_len_w:
+            freqs_w = freqs[2][:w]
+        else:
+            indices_w = torch.arange(w, device=freqs[2].device) % max_freq_len_w
+            freqs_w = freqs[2][indices_w]
+        
         freqs_i = torch.cat([
-            freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+            freqs_t.view(f, 1, 1, -1).expand(f, h, w, -1),
+            freqs_h.view(1, h, 1, -1).expand(f, h, w, -1),
+            freqs_w.view(1, 1, w, -1).expand(f, h, w, -1)
         ], dim=-1).reshape(seq_len, 1, -1)
         
         # Apply rotary embedding
@@ -67,12 +96,39 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
         seq_len = f * h * w
         
+        # Clamp dimensions to prevent index out of bounds
+        max_freq_len_t = freqs[0].shape[0]
+        max_freq_len_h = freqs[1].shape[0]
+        max_freq_len_w = freqs[2].shape[0]
+        
+        # Handle temporal dimension with start_frame offset
+        end_frame = start_frame + f
+        if end_frame <= max_freq_len_t:
+            freqs_t = freqs[0][start_frame:end_frame]
+        else:
+            # Use modulo if exceeding buffer
+            indices_t = (torch.arange(start_frame, end_frame, device=freqs[0].device) % max_freq_len_t)
+            freqs_t = freqs[0][indices_t]
+        
+        # Handle spatial dimensions
+        if h <= max_freq_len_h:
+            freqs_h = freqs[1][:h]
+        else:
+            indices_h = torch.arange(h, device=freqs[1].device) % max_freq_len_h
+            freqs_h = freqs[1][indices_h]
+        
+        if w <= max_freq_len_w:
+            freqs_w = freqs[2][:w]
+        else:
+            indices_w = torch.arange(w, device=freqs[2].device) % max_freq_len_w
+            freqs_w = freqs[2][indices_w]
+        
         x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
             seq_len, n, -1, 2))
         freqs_i = torch.cat([
-            freqs[0][start_frame:start_frame + f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+            freqs_t.view(f, 1, 1, -1).expand(f, h, w, -1),
+            freqs_h.view(1, h, 1, -1).expand(f, h, w, -1),
+            freqs_w.view(1, 1, w, -1).expand(f, h, w, -1)
         ], dim=-1).reshape(seq_len, 1, -1)
         
         x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
