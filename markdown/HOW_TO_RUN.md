@@ -17,13 +17,13 @@ This guide provides all the commands needed to train, generate, evaluate, and vi
 ### Basic Training Command
 
 ```bash
-python train_tutorial.py --num_epochs 5 --batch_size 2
+python trainer.py --num_epochs 5 --batch_size 2
 ```
 
 ### Full Training Command with All Options
 
 ```bash
-python train_tutorial.py \
+python trainer.py \
     --num_epochs 5 \
     --batch_size 2 \
     --lr 1e-4 \
@@ -58,10 +58,10 @@ After training, you'll find:
 
 ```bash
 # Quick training run (5 epochs, 2 samples per batch)
-python train_tutorial.py --num_epochs 5 --batch_size 2 --num_samples 20
+python trainer.py --num_epochs 5 --batch_size 2 --num_samples 20
 
 # Longer training run
-python train_tutorial.py --num_epochs 20 --batch_size 4 --num_samples 100 --log_dir .logs/long_training
+python trainer.py --num_epochs 20 --batch_size 4 --num_samples 100 --log_dir .logs/long_training
 ```
 
 ---
@@ -243,7 +243,7 @@ Currently, generation/inference is done via Python code using the Self-Forcing p
 import torch
 from algorithm import SimplifiedSelfForcingPipeline
 from model import TinyCausalWanModel
-from train_tutorial import SimpleScheduler, SimpleTextEncoder
+from trainer import SimpleScheduler, SimpleTextEncoder
 
 # Setup device
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -338,7 +338,7 @@ for i, video in enumerate(generated_videos):
 
 ```bash
 # 1. Train the model
-python train_tutorial.py \
+python trainer.py \
     --num_epochs 10 \
     --batch_size 2 \
     --num_samples 50 \
@@ -408,7 +408,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "original_impl"))
 
 from algorithm import SimplifiedSelfForcingPipeline
 from model import TinyCausalWanModel
-from train_tutorial import SimpleScheduler, SimpleTextEncoder
+from trainer import SimpleScheduler, SimpleTextEncoder
 from visualization import create_video_gif, save_video_grid
 
 def main():

@@ -16,7 +16,7 @@ sys.path.insert(0, str(root_dir))
 
 from algorithm import SimplifiedSelfForcingPipeline
 from model import TinyCausalWanModel
-from train_tutorial import SimpleScheduler, SimpleTextEncoder
+from trainer import SimpleScheduler, SimpleTextEncoder
 from visualization import create_video_gif, save_video_grid
 
 

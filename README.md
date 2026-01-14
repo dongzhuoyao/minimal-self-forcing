@@ -87,9 +87,7 @@ for metric_name, value in results.items():
 │   └── training_plots.py        # Training progress plots
 ├── configs/
 │   └── tutorial_config.yaml     # Simplified config
-└── training/
-    ├── trainer.py               # Simplified trainer
-    └── train_tutorial.py        # Training script
+└── trainer.py        # Training script (includes SimplifiedTrainer class and main function)
 ```
 
 ## Components
@@ -161,7 +159,7 @@ clip_score = clip_metric.compute(video, "A red circle moving")
 
 **Simplified training loop** for Self-Forcing:
 - `SimplifiedTrainer`: Training loop with Self-Forcing simulation
-- `train_tutorial.py`: Complete training script
+- `trainer.py`: Complete training script (includes main function)
 - Checkpoint saving and metrics logging
 - Integration with visualization tools
 
@@ -199,7 +197,7 @@ create_video_gif(video, "output.gif", fps=8)
 ### Run Training Example
 
 ```bash
-python train_tutorial.py --num_epochs 5 --batch_size 2
+python trainer.py --num_epochs 5 --batch_size 2
 ```
 
 This demonstrates:

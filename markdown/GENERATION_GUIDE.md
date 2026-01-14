@@ -158,7 +158,7 @@ After training, you can immediately generate videos:
 
 ```bash
 # Train for a few epochs
-python train_tutorial.py --num_epochs 5 --batch_size 2
+python trainer.py --num_epochs 5 --batch_size 2
 
 # Generate videos with the trained model
 python generate.py \

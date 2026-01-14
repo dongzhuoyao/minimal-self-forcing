@@ -19,9 +19,7 @@ tutorial/
 │   └── prompts/                 # Simple text prompts
 ├── models/
 │   └── simple_model.py         # Simplified model wrapper
-├── training/
-│   ├── train_tutorial.py       # Simplified training script
-│   └── trainer.py              # Simplified trainer
+├── trainer.py       # Training script (includes SimplifiedTrainer class and main function)
 ├── inference/
 │   └── inference_tutorial.py  # Simplified inference script
 ├── evaluation/
@@ -133,11 +131,12 @@ tutorial/
 
 ### Training
 ```python
-import train_tutorial
+from trainer import SimplifiedTrainer
 from data import ToyDataset
 
 dataset = ToyDataset(num_samples=100)
-train_tutorial(dataset, config_path="configs/tutorial_config.yaml")
+# Use trainer.main() or SimplifiedTrainer class directly
+# See trainer.py for usage examples
 ```
 
 ### Inference
