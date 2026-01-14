@@ -3,7 +3,7 @@
 ## 1. Generate Toy Dataset
 
 ```python
-from data import ToyDataset
+from toy_dataset import ToyDataset
 
 # Create 10 synthetic videos
 dataset = ToyDataset(num_samples=10, width=256, height=256, num_frames=16)
@@ -16,7 +16,7 @@ dataset.save_prompts("data/prompts/toy_prompts.txt")
 
 ```python
 from visualization import save_video_grid, create_video_gif
-from data import ToyDataset
+from toy_dataset import ToyDataset
 
 dataset = ToyDataset(num_samples=9)
 videos = [dataset[i]["video"] for i in range(9)]
@@ -33,8 +33,8 @@ for i, video in enumerate(videos):
 ## 3. Evaluate Videos
 
 ```python
-from evaluation import compute_all_metrics
-from data import ToyDataset
+from metrics import compute_all_metrics
+from toy_dataset import ToyDataset
 
 dataset = ToyDataset(num_samples=10)
 videos = [dataset[i]["video"] for i in range(10)]
@@ -50,14 +50,14 @@ The tutorial components can be used alongside the original Self-Forcing codebase
 
 1. **Generate prompts for training:**
    ```python
-   from data import ToyDataset
+   from toy_dataset import ToyDataset
    dataset = ToyDataset(num_samples=1000)
    dataset.save_prompts("prompts/toy_prompts.txt")
    ```
 
 2. **Evaluate after inference:**
    ```python
-   from evaluation import compute_all_metrics
+   from metrics import compute_all_metrics
    results = compute_all_metrics(generated_videos, prompts)
    ```
 

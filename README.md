@@ -78,13 +78,13 @@ For more detailed information, see the documentation in the `markdown/` folder:
 
 ```
 ├── algorithm/          # Self-Forcing algorithm implementation
-├── data/              # Toy dataset generator
-├── evaluation/        # Evaluation metrics
 ├── visualization/     # Visualization tools
-├── model/             # Model definitions
 ├── configs/           # Configuration files
 ├── trainer.py         # Training script
 ├── generate.py        # Generation/sampling script
+├── tiny_causal_wan.py # Model definition
+├── metrics.py         # Evaluation metrics
+├── toy_dataset.py     # Toy dataset generator
 └── markdown/          # Detailed documentation
 ```
 

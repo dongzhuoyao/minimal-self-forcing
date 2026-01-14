@@ -15,7 +15,7 @@ import sys
 import argparse
 from tqdm import tqdm
 
-from data import ToyDataset
+from toy_dataset import ToyDataset
 from visualization import TrainingPlotter
 from tiny_causal_wan import TinyCausalWanModel
 

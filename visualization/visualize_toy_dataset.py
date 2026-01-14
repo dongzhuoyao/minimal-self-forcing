@@ -14,7 +14,7 @@ sys.path.insert(0, str(root_dir))
 # Also add original_impl if needed
 sys.path.insert(0, str(root_dir / "original_impl"))
 
-from data import ToyDataset
+from toy_dataset import ToyDataset
 from visualization import (
     save_video_grid,
     create_video_gif,

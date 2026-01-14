@@ -6,7 +6,7 @@ I've extracted and created a tutorial codebase from `./original_impl` with the f
 
 ### ✅ Completed Components
 
-1. **Toy Dataset Generator** (`tutorial/data/toy_dataset.py`)
+1. **Toy Dataset Generator** (`toy_dataset.py`)
    - Generates synthetic videos with simple animations
    - No external video data required
    - Supports: moving shapes, rotating shapes, color transitions, bouncing balls
@@ -49,10 +49,7 @@ tutorial/
 ├── QUICK_START.md               # Quick start guide
 ├── requirements.txt             # Dependencies
 ├── __init__.py                  # Package initialization
-├── data/
-│   ├── __init__.py
-│   ├── toy_dataset.py          # Synthetic dataset generator
-│   └── prompts/                 # (will be created when generating dataset)
+├── toy_dataset.py          # Synthetic dataset generator
 ├── evaluation/
 │   ├── __init__.py
 │   └── metrics.py               # Evaluation metrics
@@ -92,7 +89,7 @@ tutorial/
 
 ### Generate Toy Dataset
 ```python
-from data import ToyDataset
+from toy_dataset import ToyDataset
 dataset = ToyDataset(num_samples=100)
 dataset.save_prompts("prompts/toy_prompts.txt")
 ```
@@ -106,7 +103,7 @@ create_video_gif(video, "output.gif", fps=8)
 
 ### Evaluate Videos
 ```python
-from evaluation import compute_all_metrics
+from metrics import compute_all_metrics
 results = compute_all_metrics(videos, prompts)
 ```
 

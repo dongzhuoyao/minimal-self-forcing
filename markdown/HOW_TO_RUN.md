@@ -108,7 +108,7 @@ You can also use visualization functions directly in Python:
 
 ```python
 from visualization import save_video_grid, create_video_gif
-from data import ToyDataset
+from toy_dataset import ToyDataset
 
 # Load dataset
 dataset = ToyDataset(num_samples=9)
@@ -132,8 +132,8 @@ for i, video in enumerate(videos):
 Currently, evaluation is done via Python code. Create a script or use interactive Python:
 
 ```python
-from evaluation import compute_all_metrics
-from data import ToyDataset
+from metrics import compute_all_metrics
+from toy_dataset import ToyDataset
 
 # Load videos and prompts
 dataset = ToyDataset(num_samples=10)
@@ -163,7 +163,7 @@ The `compute_all_metrics` function computes:
 ### Individual Metric Usage
 
 ```python
-from evaluation import (
+from metrics import (
     FrameConsistencyMetric,
     CLIPScoreMetric,
     VisualQualityMetric,
@@ -191,8 +191,8 @@ fps = speed_metric.compute_fps(num_frames=16, generation_time=2.5)
 ### Evaluation with Ground Truth
 
 ```python
-from evaluation import compute_all_metrics
-from data import ToyDataset
+from metrics import compute_all_metrics
+from toy_dataset import ToyDataset
 
 # Generate dataset
 dataset = ToyDataset(num_samples=10)
@@ -218,8 +218,8 @@ print(results)
 
 ```python
 from visualization import plot_evaluation_results
-from evaluation import compute_all_metrics
-from data import ToyDataset
+from metrics import compute_all_metrics
+from toy_dataset import ToyDataset
 
 # Compute metrics
 dataset = ToyDataset(num_samples=10)
@@ -365,8 +365,8 @@ python generate.py
 #!/usr/bin/env python3
 """Evaluate videos from toy dataset."""
 
-from evaluation import compute_all_metrics, plot_evaluation_results
-from data import ToyDataset
+from metrics import compute_all_metrics, plot_evaluation_results
+from toy_dataset import ToyDataset
 
 def main():
     # Load dataset

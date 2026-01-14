@@ -361,8 +361,8 @@ if __name__ == "__main__":
     dataset = ToyDataset(num_samples=10, width=256, height=256, num_frames=16)
     
     # Save prompts
-    dataset.save_prompts("tutorial/data/prompts/toy_prompts.txt")
-    dataset.save_metadata("tutorial/data/toy_metadata.json")
+    dataset.save_prompts("data/prompts/toy_prompts.txt")
+    dataset.save_metadata("data/toy_metadata.json")
     
     # Display first sample
     sample = dataset[0]

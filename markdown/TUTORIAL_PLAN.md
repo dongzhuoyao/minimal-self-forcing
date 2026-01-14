@@ -14,9 +14,7 @@ tutorial/
 ├── requirements.txt             # Simplified dependencies
 ├── configs/
 │   └── tutorial_config.yaml     # Simplified config for tutorial
-├── data/
-│   ├── toy_dataset.py          # Synthetic dataset generator
-│   └── prompts/                 # Simple text prompts
+├── toy_dataset.py          # Synthetic dataset generator
 ├── models/
 │   └── simple_model.py         # Simplified model wrapper
 ├── trainer.py       # Training script (includes SimplifiedTrainer class and main function)
@@ -36,7 +34,7 @@ tutorial/
 
 ## Key Components
 
-### 1. Toy Dataset (`data/toy_dataset.py`)
+### 1. Toy Dataset (`toy_dataset.py`)
 **Purpose**: Generate synthetic video data for quick experimentation
 
 **Features**:
@@ -132,7 +130,7 @@ tutorial/
 ### Training
 ```python
 from trainer import SimplifiedTrainer
-from data import ToyDataset
+from toy_dataset import ToyDataset
 
 dataset = ToyDataset(num_samples=100)
 # Use trainer.main() or SimplifiedTrainer class directly
@@ -150,7 +148,7 @@ display_video(video)
 
 ### Evaluation
 ```python
-from evaluation import evaluate_videos
+from metrics import compute_all_metrics
 
 results = evaluate_videos(
     videos=generated_videos,
