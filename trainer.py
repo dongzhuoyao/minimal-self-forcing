@@ -418,7 +418,7 @@ class SimplifiedTrainer:
             metrics = self.train_step(batch, conditional_dict)
             
             # Update progress bar
-            pbar.set_postfix({"loss": f"{metrics['loss']:.4f}", "step": self.step})
+            pbar.set_postfix({"loss": f"{metrics['loss']:.8f}", "step": self.step})
             pbar.update(1)
             
             # Logging
@@ -441,7 +441,7 @@ class SimplifiedTrainer:
     def _log_metrics(self, metrics: Dict[str, float]):
         """Log metrics (can be extended to use wandb, tensorboard, etc.)."""
         if self.step % self.log_interval == 0:
-            print(f"Step {self.step}: Loss = {metrics['loss']:.4f}")
+            print(f"Step {self.step}: Loss = {metrics['loss']:.8f}")
     
     def _save_checkpoint(self, final: bool = False):
         """Save model checkpoint."""
@@ -932,12 +932,12 @@ def main():
         plotter.log_metric("loss", metrics["loss"], trainer.step)
         
         # Update progress bar
-        pbar.set_postfix({"loss": f"{metrics['loss']:.4f}", "step": trainer.step})
+        pbar.set_postfix({"loss": f"{metrics['loss']:.8f}", "step": trainer.step})
         pbar.update(1)
         
         # Print progress
         if trainer.step % args.log_interval == 0:
-            print(f"Step {trainer.step}: Loss = {metrics['loss']:.4f}")
+            print(f"Step {trainer.step}: Loss = {metrics['loss']:.8f}")
         
         # Save checkpoint
         if trainer.step % args.save_interval == 0:

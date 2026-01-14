@@ -1,0 +1,117 @@
+# Self-Forcing Project Guidelines
+
+This file serves as the central guidance for Cursor AI assistance in this project.
+
+## Project Overview
+
+This is a Self-Forcing video generation codebase - a simplified, educational implementation of the Self-Forcing algorithm for autoregressive video diffusion models.
+
+## Key Documentation Files
+
+**Primary Reference Documents:**
+- `markdown/HOW_TO_RUN.md` - Complete guide for all operations (training, generation, evaluation)
+- `markdown/QUICK_START.md` - Quick start examples and common workflows
+- `markdown/ALGORITHM_SUMMARY.md` - Detailed explanation of the Self-Forcing algorithm
+- `README.md` - Project overview and quick reference
+
+**Additional Guides:**
+- `markdown/GENERATION_GUIDE.md` - Video generation guide
+- `markdown/CONDA_SETUP.md` - Environment setup instructions
+- `markdown/TUTORIAL_SUMMARY.md` - Tutorial overview
+
+## Project Structure
+
+```
+├── trainer.py              # Main training script
+├── generate.py             # Video generation script
+├── tiny_causal_wan.py      # Model architecture
+├── toy_dataset.py          # Synthetic dataset generator
+├── metrics.py              # Evaluation metrics
+├── visualization/          # Visualization utilities
+├── configs/                # Configuration files
+├── logs/                   # Training logs and checkpoints
+├── outputs/                # Generated videos
+└── markdown/               # Documentation
+```
+
+## Code Style & Conventions
+
+1. **Python Style**: Follow PEP 8 conventions
+2. **Docstrings**: Use Google-style docstrings for functions and classes
+3. **Type Hints**: Use type hints where appropriate
+4. **Error Handling**: Provide clear error messages
+5. **Comments**: Explain complex logic, especially Self-Forcing specific concepts
+
+## Key Concepts
+
+### Self-Forcing Algorithm
+- **Core Idea**: Simulate inference during training to bridge train-test gap
+- **Autoregressive Generation**: Generate videos block-by-block
+- **KV Caching**: Cache key-value pairs for efficient autoregressive generation
+- **Distribution Matching**: Uses DMD/SiD/CausVid for data-free training
+
+### Model Architecture
+- **TinyCausalWanModel**: Simplified transformer-based video generation model
+- **RoPE**: Rotary Position Embedding for spatial-temporal encoding
+- **FlexAttention**: Efficient attention mechanism with causal masking
+- **Block-wise Causal Mask**: Each block attends to all previous blocks
+
+### Training Process
+- **Data-free**: Does NOT require ground truth videos
+- **Self-Forcing Loss**: Distribution matching loss (simplified for tutorial)
+- **Block-by-block**: Generates videos autoregressively during training
+- **Gradient Control**: Only last 21 frames compute gradients
+
+## Common Tasks
+
+### Training
+```bash
+python trainer.py --num_steps 1000 --batch_size 64
+```
+
+### Generation
+```bash
+python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
+```
+
+### Key Files to Modify
+- `trainer.py`: Training loop and loss computation
+- `generate.py`: Video generation and inference
+- `tiny_causal_wan.py`: Model architecture
+- `toy_dataset.py`: Dataset generation
+
+## Important Notes
+
+1. **Checkpoint Format**: Checkpoints contain `generator_state_dict` key
+2. **Device Handling**: Always check CUDA availability before using GPU
+3. **Frame Count**: Must be divisible by `num_frames_per_block` (default: 3)
+4. **Tensor Formats**: 
+   - Model input/output: `[B, F, C, H, W]` where F=frames, C=channels
+   - Visualization expects: `[F, C, H, W]` or `[B, F, C, H, W]`
+5. **Normalization**: Model outputs in `[-1, 1]` range, convert to `[0, 1]` for visualization
+
+## When Making Changes
+
+1. **Check Documentation**: Refer to `markdown/HOW_TO_RUN.md` for command-line arguments
+2. **Maintain Compatibility**: Ensure changes work with existing checkpoints
+3. **Update Documentation**: Update relevant markdown files if changing behavior
+4. **Test Both Paths**: Test training and generation after changes
+5. **Error Messages**: Provide helpful error messages with suggestions
+
+## AI Assistant Guidelines
+
+When helping with this project:
+- Always reference the documentation in `markdown/` folder
+- Understand the Self-Forcing algorithm before suggesting changes
+- Consider both training and inference paths
+- Check checkpoint compatibility when modifying model architecture
+- Provide working code examples with proper imports
+- Include error handling and device management
+- Follow the existing code style and structure
+
+## Quick Reference
+
+**Training Arguments**: See `trainer.py --help` or `markdown/HOW_TO_RUN.md`
+**Generation Arguments**: See `generate.py --help` or `markdown/GENERATION_GUIDE.md`
+**Model Config**: See `configs/config.yaml`
+**Checkpoints**: Saved in `logs/training/` directory
