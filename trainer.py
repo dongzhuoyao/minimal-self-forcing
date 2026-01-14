@@ -8,13 +8,13 @@ Includes the trainer class, scheduler, text encoder, and main training script.
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pathlib import Path
 import argparse
 from tqdm import tqdm
 
 from toy_dataset import ToyDataset
-from visualization import TrainingPlotter
+from visualization import TrainingPlotter, create_video_gif, save_video_grid
 from tiny_causal_wan import TinyCausalWanModel
 
 
@@ -34,7 +34,8 @@ class SimplifiedTrainer:
         device: str = "cuda",
         log_dir: str = "logs/training",
         save_interval: int = 10,
-        log_interval: int = 5
+        log_interval: int = 5,
+        viz_interval: int = 100
     ):
         """
         Args:
@@ -45,6 +46,7 @@ class SimplifiedTrainer:
             log_dir: Directory to save logs and checkpoints
             save_interval: Save checkpoint every N steps
             log_interval: Log metrics every N steps
+            viz_interval: Generate and save sample videos every N steps
         """
         self.generator = generator.to(device)
         self.optimizer = optimizer
@@ -53,9 +55,14 @@ class SimplifiedTrainer:
         self.log_dir = Path(log_dir)
         self.save_interval = save_interval
         self.log_interval = log_interval
+        self.viz_interval = viz_interval
         
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create samples directory for visualizations
+        self.samples_dir = self.log_dir / "samples"
+        self.samples_dir.mkdir(parents=True, exist_ok=True)
         
         # Training state
         self.step = 0
@@ -88,10 +95,11 @@ class SimplifiedTrainer:
         
         # Sample noise for video generation
         # Shape: (batch_size, num_frames, channels, height, width)
-        # For Self-Forcing, we generate 21 frames (7 blocks × 3 frames per block)
-        # This matches the standard training setup where last 21 frames are used for loss
-        num_frames = 21  # 7 blocks × 3 frames per block
-        channels, height, width = 3, 64, 64
+        # For Self-Forcing, we generate frames (configurable)
+        num_frames = getattr(self, 'training_num_frames', 21)
+        channels = 3
+        height = getattr(self, 'video_height', 64)
+        width = getattr(self, 'video_width', 64)
         
         noise = torch.randn(
             batch_size, num_frames, channels, height, width,
@@ -118,7 +126,8 @@ class SimplifiedTrainer:
         loss.backward()
         
         # Gradient clipping (optional but recommended)
-        torch.nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=1.0)
+        gradient_clip_norm = getattr(self, 'gradient_clip_norm', 1.0)
+        torch.nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=gradient_clip_norm)
         
         # Optimizer step
         self.optimizer.step()
@@ -445,6 +454,131 @@ class SimplifiedTrainer:
         self.step = checkpoint.get("step", 0)
         self.metrics_history = checkpoint.get("metrics_history", {"loss": [], "step": []})
         print(f"Loaded checkpoint from {checkpoint_path} (step {self.step})")
+    
+    def generate_sample_videos(
+        self,
+        text_encoder: nn.Module,
+        num_samples: int = 4,
+        num_frames: int = 9,
+        num_frames_per_block: int = 3,
+        prompts: Optional[List[str]] = None
+    ):
+        """
+        Generate sample videos for visualization during training.
+        
+        Args:
+            text_encoder: Text encoder for encoding prompts
+            num_samples: Number of sample videos to generate
+            num_frames: Number of frames per video
+            num_frames_per_block: Frames per block for generation
+            prompts: Optional list of prompts (uses defaults if None)
+        """
+        self.generator.eval()
+        
+        # Sample prompts from config or defaults
+        if prompts is None:
+            sample_prompts = [
+                "A red circle moving horizontally",
+                "A blue square rotating clockwise",
+                "A yellow ball bouncing",
+                "Color gradient transitioning from red to blue"
+            ][:num_samples]
+        else:
+            sample_prompts = prompts[:num_samples]
+        
+        with torch.no_grad():
+            # Encode prompts
+            conditional_dict = text_encoder(sample_prompts)
+            
+            # Create noise
+            batch_size = len(sample_prompts)
+            noise = torch.randn(
+                batch_size, num_frames, 3, 64, 64,
+                device=self.device
+            )
+            
+            # Generate videos using simplified inference (full video, not just last 21 frames)
+            generated_videos = self._generate_full_video(noise, conditional_dict, num_frames_per_block)
+            
+            # Convert from latents to pixel space (denormalize)
+            # The model outputs in [-1, 1] range, convert to [0, 1]
+            generated_videos = (generated_videos + 1.0) / 2.0
+            generated_videos = generated_videos.clamp(0, 1)
+            
+            # Save individual GIFs
+            videos_list = []
+            for i, video_tensor in enumerate(generated_videos):
+                gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
+                create_video_gif(video_tensor, str(gif_path), fps=8)
+                videos_list.append(video_tensor)
+            
+            # Save grid of all videos
+            grid_path = self.samples_dir / f"step_{self.step:06d}_grid.png"
+            save_video_grid(videos_list, str(grid_path), prompts=sample_prompts)
+            
+            print(f"  Saved sample videos to {self.samples_dir}")
+        
+        self.generator.train()
+    
+    def _generate_full_video(
+        self,
+        noise: torch.Tensor,
+        conditional_dict: Dict[str, torch.Tensor],
+        num_frames_per_block: int = 3
+    ) -> torch.Tensor:
+        """
+        Generate full video for visualization (simplified version without gradient control).
+        
+        Args:
+            noise: Initial noise tensor of shape [B, F, C, H, W]
+            conditional_dict: Conditional information
+            num_frames_per_block: Frames per block
+        
+        Returns:
+            Generated video of shape [B, F, C, H, W]
+        """
+        batch_size, num_frames, num_channels, height, width = noise.shape
+        denoising_steps = getattr(self, 'denoising_steps', [1000, 750, 500, 250])
+        
+        # Calculate number of blocks
+        assert num_frames % num_frames_per_block == 0
+        num_blocks = num_frames // num_frames_per_block
+        
+        # Initialize output tensor
+        output = torch.zeros_like(noise)
+        current_start_frame = 0
+        
+        # Generate block by block
+        for block_idx in range(num_blocks):
+            # Get noise for this block
+            block_noise = noise[:, current_start_frame:current_start_frame + num_frames_per_block]
+            noisy_input = block_noise
+            
+            # Denoising loop
+            for step_idx, timestep in enumerate(denoising_steps):
+                timestep_tensor = torch.full(
+                    (batch_size, num_frames_per_block),
+                    timestep,
+                    device=self.device,
+                    dtype=torch.long
+                )
+                
+                # Forward pass
+                denoised, _ = self.generator(noisy_input, timestep_tensor, conditional_dict)
+                
+                # If not last step, add noise for next iteration
+                if step_idx < len(denoising_steps) - 1:
+                    next_timestep = denoising_steps[step_idx + 1]
+                    noise_to_add = torch.randn_like(denoised)
+                    alpha = 1.0 - (next_timestep / 1000.0)
+                    noisy_input = alpha * denoised + (1 - alpha) * noise_to_add
+                else:
+                    # Last step: store result
+                    output[:, current_start_frame:current_start_frame + num_frames_per_block] = denoised
+            
+            current_start_frame += num_frames_per_block
+        
+        return output
 
 
 class SimpleScheduler:
@@ -577,35 +711,114 @@ class SimpleTextEncoder(nn.Module):
 def main():
     """Main training script."""
     parser = argparse.ArgumentParser(description="Train Self-Forcing model (tutorial)")
-    parser.add_argument("--num_steps", type=int, default=10000, help="Number of training steps")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--num_samples", type=int, default=20, help="Number of training samples")
-    parser.add_argument("--log_dir", type=str, default="logs/training", help="Log directory")
-    parser.add_argument("--save_interval", type=int, default=10, help="Save checkpoint every N steps")
-    parser.add_argument("--log_interval", type=int, default=5, help="Log metrics every N steps")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device")
+    parser.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config YAML file")
+    parser.add_argument("--num_steps", type=int, default=None, help="Number of training steps (overrides config)")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size (overrides config)")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate (overrides config)")
+    parser.add_argument("--num_samples", type=int, default=None, help="Number of training samples (overrides config)")
+    parser.add_argument("--log_dir", type=str, default=None, help="Log directory (overrides config)")
+    parser.add_argument("--save_interval", type=int, default=None, help="Save checkpoint every N steps (overrides config)")
+    parser.add_argument("--log_interval", type=int, default=None, help="Log metrics every N steps (overrides config)")
+    parser.add_argument("--device", type=str, default=None, help="Device (overrides config)")
     
     args = parser.parse_args()
     
+    # Load config file
+    config_path = Path(args.config)
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+    else:
+        print(f"Warning: Config file {config_path} not found, using defaults")
+        config = {}
+    
+    # Override config with command-line arguments if provided
+    if args.num_steps is not None:
+        config.setdefault('training', {})['num_steps'] = args.num_steps
+    if args.batch_size is not None:
+        config.setdefault('training', {})['batch_size'] = args.batch_size
+    if args.lr is not None:
+        config.setdefault('training', {})['lr'] = args.lr
+    if args.num_samples is not None:
+        config.setdefault('training', {})['num_samples'] = args.num_samples
+    if args.log_dir is not None:
+        config.setdefault('paths', {})['log_dir'] = args.log_dir
+    if args.save_interval is not None:
+        config.setdefault('training', {})['save_interval'] = args.save_interval
+    if args.log_interval is not None:
+        config.setdefault('training', {})['log_interval'] = args.log_interval
+    if args.device is not None:
+        config['device'] = args.device
+    
+    # Extract config values with defaults
+    model_cfg = config.get('model', {})
+    training_cfg = config.get('training', {})
+    paths_cfg = config.get('paths', {})
+    device = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+    seed = config.get('seed', 42)
+    
+    # Set random seed
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    
+    # Training hyperparameters
+    num_steps = training_cfg.get('num_steps', 10000)
+    batch_size = training_cfg.get('batch_size', 64)
+    lr = training_cfg.get('lr', 1e-4)
+    weight_decay = training_cfg.get('weight_decay', 0.01)
+    num_samples = training_cfg.get('num_samples', 20)
+    save_interval = training_cfg.get('save_interval', 10)
+    log_interval = training_cfg.get('log_interval', 5)
+    viz_interval = training_cfg.get('viz_interval', 100)
+    log_dir = paths_cfg.get('log_dir', 'logs/training')
+    video_height = training_cfg.get('video_height', 64)
+    video_width = training_cfg.get('video_width', 64)
+    video_frames = training_cfg.get('video_frames', 9)
+    
+    # Model hyperparameters
+    model_dim = model_cfg.get('dim', 256)
+    model_ffn_dim = model_cfg.get('ffn_dim', 1024)
+    model_num_heads = model_cfg.get('num_heads', 4)
+    model_num_layers = model_cfg.get('num_layers', 4)
+    patch_size = tuple(model_cfg.get('patch_size', [1, 2, 2]))
+    text_dim = model_cfg.get('text_dim', 128)
+    freq_dim = model_cfg.get('freq_dim', 256)
+    num_frame_per_block = model_cfg.get('num_frame_per_block', 3)
+    
+    args = type('Args', (), {
+        'num_steps': num_steps,
+        'batch_size': batch_size,
+        'lr': lr,
+        'num_samples': num_samples,
+        'log_dir': log_dir,
+        'save_interval': save_interval,
+        'log_interval': log_interval,
+        'device': device,
+        'config': config
+    })()
+    
     print("=" * 70)
     print("Self-Forcing Training Tutorial")
+    print("=" * 70)
+    print(f"Config: {config_path}")
+    print(f"Device: {device}")
     print("=" * 70)
     
     # Create dataset
     print("\n1. Creating toy dataset...")
     dataset = ToyDataset(
-        num_samples=args.num_samples,
-        width=64,
-        height=64,
-        num_frames=9
+        num_samples=num_samples,
+        width=video_width,
+        height=video_height,
+        num_frames=video_frames
     )
     print(f"   Created {len(dataset)} samples")
     
     # Create dataloader
     dataloader = DataLoader(
         dataset,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=0
     )
@@ -614,28 +827,34 @@ def main():
     print("\n2. Creating model...")
     # Use TinyCausalWanModel
     generator = TinyCausalWanModel(
-        in_dim=3,  # RGB channels
-        out_dim=3,
-        dim=256,  # Hidden dimension 
-        ffn_dim=1024,  # FFN dimension 
-        num_heads=4,  # Attention heads 
-        num_layers=4,  # Transformer layers 
-        patch_size=(1, 2, 2),  # Patch size for embedding
-        text_dim=128,  # Text embedding dimension
-        freq_dim=256,  # Time embedding dimension
-        num_frame_per_block=3,  # Frames per block for causal mask
+        in_dim=model_cfg.get('in_dim', 3),
+        out_dim=model_cfg.get('out_dim', 3),
+        dim=model_dim,
+        ffn_dim=model_ffn_dim,
+        num_heads=model_num_heads,
+        num_layers=model_num_layers,
+        patch_size=patch_size,
+        text_dim=text_dim,
+        freq_dim=freq_dim,
+        num_frame_per_block=num_frame_per_block,
     )
     print(f"   Model parameters: {sum(p.numel() for p in generator.parameters()):,}")
     print(f"   Using TinyCausalWanModel (transformer backbone)")
     
-    # Create text encoder (matching TinyCausalWanModel's text_dim)
-    text_encoder = SimpleTextEncoder(device=args.device, text_dim=128)
+    # Create text encoder
+    text_encoder_cfg = config.get('text_encoder', {})
+    text_encoder = SimpleTextEncoder(
+        device=device,
+        text_dim=text_encoder_cfg.get('text_dim', text_dim),
+        text_len=text_encoder_cfg.get('text_len', 77),
+        vocab_size=text_encoder_cfg.get('vocab_size', 256)
+    )
     
     # Create optimizer (include text encoder parameters so they can be trained)
     optimizer = torch.optim.AdamW(
         list(generator.parameters()) + list(text_encoder.parameters()),
-        lr=args.lr,
-        weight_decay=0.01
+        lr=lr,
+        weight_decay=weight_decay
     )
     
     # Create scheduler
@@ -647,10 +866,12 @@ def main():
         generator=generator,
         optimizer=optimizer,
         scheduler=scheduler,
-        device=args.device,
-        log_dir=args.log_dir,
-        save_interval=args.save_interval,
-        log_interval=args.log_interval
+        device=device,
+        log_dir=log_dir,
+        save_interval=save_interval,
+        log_interval=log_interval,
+        viz_interval=viz_interval,
+        config=config
     )
     
     # Training plotter
@@ -700,6 +921,24 @@ def main():
         if trainer.step % args.save_interval == 0:
             trainer._save_checkpoint()
         
+        # Generate and save sample videos for visualization
+        if trainer.step % viz_interval == 0 and trainer.step > 0:
+            print(f"\nGenerating sample videos at step {trainer.step}...")
+            gen_cfg = config.get('generation', {})
+            viz_prompts = config.get('viz_prompts', [
+                "A red circle moving horizontally",
+                "A blue square rotating clockwise",
+                "A yellow ball bouncing",
+                "Color gradient transitioning from red to blue"
+            ])
+            trainer.generate_sample_videos(
+                text_encoder=text_encoder,
+                num_samples=gen_cfg.get('num_viz_samples', 4),
+                num_frames=gen_cfg.get('viz_num_frames', 9),
+                num_frames_per_block=num_frame_per_block,
+                prompts=viz_prompts
+            )
+        
         # Check if we've reached the target number of steps
         if trainer.step >= args.num_steps:
             break
@@ -715,11 +954,21 @@ def main():
     plotter.plot_metric("loss", title="Training Loss")
     plotter.save_history(str(Path(args.log_dir) / "metrics_history.json"))
     
+    # Generate final sample videos
+    print("\nGenerating final sample videos...")
+    trainer.generate_sample_videos(
+        text_encoder=text_encoder,
+        num_samples=4,
+        num_frames=9,
+        num_frames_per_block=3
+    )
+    
     print("\n" + "=" * 70)
     print("Training completed!")
     print("=" * 70)
     print(f"\nCheckpoints saved to: {args.log_dir}")
     print(f"Plots saved to: {Path(args.log_dir) / 'plots'}")
+    print(f"Sample videos saved to: {Path(args.log_dir) / 'samples'}")
     print("\nKey points:")
     print("1. Self-Forcing simulates inference during training")
     print("2. Videos are generated block-by-block autoregressively")

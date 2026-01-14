@@ -10,6 +10,7 @@ import torch.nn as nn
 import argparse
 from pathlib import Path
 import sys
+import yaml
 from typing import List, Dict, Tuple
 
 # Add root directory to path
@@ -280,78 +281,119 @@ class SimplifiedSelfForcingPipeline:
 def main():
     parser = argparse.ArgumentParser(description="Generate videos using trained checkpoint")
     parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/config.yaml",
+        help="Path to config YAML file"
+    )
+    parser.add_argument(
         "--checkpoint", 
         type=str, 
-        default="logs/training/checkpoint_final.pt",
-        help="Path to checkpoint file"
+        default=None,
+        help="Path to checkpoint file (overrides config)"
     )
     parser.add_argument(
         "--prompts", 
         type=str, 
         nargs="+", 
-        default=["A red circle moving horizontally"],
-        help="Text prompts for video generation"
+        default=None,
+        help="Text prompts for video generation (overrides config)"
     )
     parser.add_argument(
         "--num_frames", 
         type=int, 
-        default=9, 
-        help="Number of frames to generate (must be divisible by num_frames_per_block)"
+        default=None, 
+        help="Number of frames to generate (overrides config)"
     )
     parser.add_argument(
         "--output_dir", 
         type=str, 
-        default="outputs/generated",
-        help="Output directory for generated videos"
+        default=None,
+        help="Output directory for generated videos (overrides config)"
     )
     parser.add_argument(
         "--device", 
         type=str, 
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to use (cuda/cpu)"
+        default=None,
+        help="Device to use (overrides config)"
     )
     parser.add_argument(
         "--num_frames_per_block",
         type=int,
-        default=3,
-        help="Number of frames per block (must divide num_frames)"
+        default=None,
+        help="Number of frames per block (overrides config)"
     )
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
-        help="Random seed for reproducibility"
+        default=None,
+        help="Random seed for reproducibility (overrides config)"
     )
     
     args = parser.parse_args()
     
+    # Load config file
+    config_path = Path(args.config)
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+    else:
+        print(f"Warning: Config file {config_path} not found, using defaults")
+        config = {}
+    
+    # Override config with command-line arguments if provided
+    paths_cfg = config.setdefault('paths', {})
+    gen_cfg = config.setdefault('generation', {})
+    model_cfg = config.setdefault('model', {})
+    
+    checkpoint = args.checkpoint or paths_cfg.get('checkpoint', 'logs/training/checkpoint_final.pt')
+    prompts = args.prompts or ["A red circle moving horizontally"]
+    num_frames = args.num_frames or gen_cfg.get('num_frames', 9)
+    output_dir = args.output_dir or gen_cfg.get('output_dir', 'outputs/generated')
+    device = args.device or config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+    num_frames_per_block = args.num_frames_per_block or gen_cfg.get('num_frames_per_block', 3)
+    seed = args.seed or config.get('seed', 42)
+    denoising_steps = gen_cfg.get('denoising_steps', [1000, 750, 500, 250])
+    
+    # Model hyperparameters
+    model_dim = model_cfg.get('dim', 256)
+    model_ffn_dim = model_cfg.get('ffn_dim', 1024)
+    model_num_heads = model_cfg.get('num_heads', 4)
+    model_num_layers = model_cfg.get('num_layers', 4)
+    patch_size = tuple(model_cfg.get('patch_size', [1, 2, 2]))
+    text_dim = model_cfg.get('text_dim', 128)
+    freq_dim = model_cfg.get('freq_dim', 256)
+    
+    # Text encoder config
+    text_encoder_cfg = config.get('text_encoder', {})
+    
     # Set random seed
-    torch.manual_seed(args.seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+        torch.cuda.manual_seed_all(seed)
     
     # Validate num_frames
-    if args.num_frames % args.num_frames_per_block != 0:
+    if num_frames % num_frames_per_block != 0:
         raise ValueError(
-            f"num_frames ({args.num_frames}) must be divisible by "
-            f"num_frames_per_block ({args.num_frames_per_block})"
+            f"num_frames ({num_frames}) must be divisible by "
+            f"num_frames_per_block ({num_frames_per_block})"
         )
     
     # Create output directory
-    output_dir = Path(args.output_dir)
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print("=" * 70)
     print("Video Generation with Self-Forcing")
     print("=" * 70)
-    print(f"Checkpoint: {args.checkpoint}")
-    print(f"Prompts: {args.prompts}")
-    print(f"Number of frames: {args.num_frames}")
-    print(f"Device: {args.device}")
+    print(f"Config: {config_path}")
+    print(f"Checkpoint: {checkpoint}")
+    print(f"Prompts: {prompts}")
+    print(f"Number of frames: {num_frames}")
+    print(f"Device: {device}")
     print("=" * 70)
     
     # Setup device
-    device = args.device
     if device == "cuda" and not torch.cuda.is_available():
         print("Warning: CUDA not available, using CPU")
         device = "cpu"
@@ -359,39 +401,39 @@ def main():
     # Create model (must match training configuration)
     print("\n1. Creating model...")
     generator = TinyCausalWanModel(
-        in_dim=3,  # RGB channels
-        out_dim=3,
-        dim=256,  # Hidden dimension
-        ffn_dim=1024,  # FFN dimension
-        num_heads=4,  # Attention heads
-        num_layers=4,  # Transformer layers
-        patch_size=(1, 2, 2),  # Patch size for embedding
-        text_dim=128,  # Text embedding dimension
-        freq_dim=256,  # Time embedding dimension
-        num_frame_per_block=args.num_frames_per_block,  # Frames per block
+        in_dim=model_cfg.get('in_dim', 3),
+        out_dim=model_cfg.get('out_dim', 3),
+        dim=model_dim,
+        ffn_dim=model_ffn_dim,
+        num_heads=model_num_heads,
+        num_layers=model_num_layers,
+        patch_size=patch_size,
+        text_dim=text_dim,
+        freq_dim=freq_dim,
+        num_frame_per_block=num_frames_per_block,
     ).to(device)
     print(f"   Model parameters: {sum(p.numel() for p in generator.parameters()):,}")
     
     # Load checkpoint
-    print(f"\n2. Loading checkpoint from {args.checkpoint}...")
-    checkpoint_path = Path(args.checkpoint)
+    print(f"\n2. Loading checkpoint from {checkpoint}...")
+    checkpoint_path = Path(checkpoint)
     if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint_data = torch.load(checkpoint_path, map_location=device)
     
     # Handle different checkpoint formats
-    if "generator_state_dict" in checkpoint:
-        generator.load_state_dict(checkpoint["generator_state_dict"])
+    if "generator_state_dict" in checkpoint_data:
+        generator.load_state_dict(checkpoint_data["generator_state_dict"])
         print(f"   Loaded generator from checkpoint")
-        if "step" in checkpoint:
-            print(f"   Checkpoint step: {checkpoint['step']}")
-        if "epoch" in checkpoint:
-            print(f"   Checkpoint epoch: {checkpoint['epoch']}")
+        if "step" in checkpoint_data:
+            print(f"   Checkpoint step: {checkpoint_data['step']}")
+        if "epoch" in checkpoint_data:
+            print(f"   Checkpoint epoch: {checkpoint_data['epoch']}")
     else:
         # Try loading as direct state dict
         try:
-            generator.load_state_dict(checkpoint)
+            generator.load_state_dict(checkpoint_data)
             print(f"   Loaded generator state dict")
         except Exception as e:
             raise ValueError(f"Could not load checkpoint: {e}")
@@ -401,30 +443,35 @@ def main():
     # Create scheduler and text encoder
     print("\n3. Setting up scheduler and text encoder...")
     scheduler = SimpleScheduler()
-    text_encoder = SimpleTextEncoder(device=device, text_dim=128)
+    text_encoder = SimpleTextEncoder(
+        device=device,
+        text_dim=text_encoder_cfg.get('text_dim', text_dim),
+        text_len=text_encoder_cfg.get('text_len', 77),
+        vocab_size=text_encoder_cfg.get('vocab_size', 256)
+    )
     
     # Create pipeline
     print("\n4. Creating inference pipeline...")
     pipeline = SimplifiedSelfForcingPipeline(
         generator=generator,
         scheduler=scheduler,
-        num_frames_per_block=args.num_frames_per_block,
-        denoising_steps=[1000, 750, 500, 250],  # Denoising timesteps
+        num_frames_per_block=num_frames_per_block,
+        denoising_steps=denoising_steps,
         device=device
     )
     
     # Generate videos
-    print(f"\n5. Generating {len(args.prompts)} video(s)...")
+    print(f"\n5. Generating {len(prompts)} video(s)...")
     print("-" * 70)
     
     # Encode prompts
-    conditional_dict = text_encoder(args.prompts)
-    batch_size = len(args.prompts)
+    conditional_dict = text_encoder(prompts)
+    batch_size = len(prompts)
     
     # Create noise
     # Shape: [B, F, C, H, W] where H=W=64 for tutorial
     noise = torch.randn(
-        batch_size, args.num_frames, 3, 64, 64, 
+        batch_size, num_frames, 3, 64, 64, 
         device=device
     )
     
@@ -444,14 +491,14 @@ def main():
         # Save individual GIF (pass tensor directly, function handles conversion)
         gif_path = output_dir / f"generated_{i:03d}.gif"
         create_video_gif(video_tensor, str(gif_path), fps=8)
-        print(f"   Saved: {gif_path} (Prompt: {args.prompts[i]})")
+        print(f"   Saved: {gif_path} (Prompt: {prompts[i]})")
         
         # Keep tensor for grid (save_video_grid also expects tensors)
         videos_list.append(video_tensor)
     
     # Save grid of all videos
     grid_path = output_dir / "generated_grid.png"
-    save_video_grid(videos_list, str(grid_path), prompts=args.prompts)
+    save_video_grid(videos_list, str(grid_path), prompts=prompts)
     print(f"   Saved grid: {grid_path}")
     
     print("\n" + "=" * 70)

@@ -13,7 +13,7 @@ tutorial/
 ├── README.md                    # Tutorial guide
 ├── requirements.txt             # Simplified dependencies
 ├── configs/
-│   └── tutorial_config.yaml     # Simplified config for tutorial
+│   └── config.yaml              # Configuration file for training and generation
 ├── toy_dataset.py          # Synthetic dataset generator
 ├── models/
 │   └── simple_model.py         # Simplified model wrapper

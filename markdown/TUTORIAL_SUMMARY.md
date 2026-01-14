@@ -26,10 +26,10 @@ I've extracted and created a tutorial codebase from `./original_impl` with the f
    - Training progress plotting
    - Evaluation results visualization
 
-4. **Configuration** (`tutorial/configs/tutorial_config.yaml`)
-   - Simplified config for tutorial use
-   - Reduced resolution/frames for faster iteration
-   - Clear comments and documentation
+4. **Configuration** (`configs/config.yaml`)
+   - Comprehensive config for training and generation
+   - All hyperparameters configurable via YAML
+   - Can be overridden with command-line arguments
 
 5. **Example Scripts** (`tutorial/examples/`)
    - Inference example with visualization
@@ -58,7 +58,7 @@ tutorial/
 │   ├── video_utils.py           # Video visualization
 │   └── training_plots.py       # Training plots
 ├── configs/
-│   └── tutorial_config.yaml     # Tutorial configuration
+│   └── config.yaml             # Configuration file for training and generation
 └── examples/
     └── inference_example.py     # Example scripts
 ```
