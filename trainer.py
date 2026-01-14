@@ -465,23 +465,110 @@ class SimpleScheduler:
 
 
 class SimpleTextEncoder(nn.Module):
-    """Simple text encoder for tutorial."""
+    """Simple deterministic text encoder for tutorial.
     
-    def __init__(self, device="cuda", text_dim=128):
+    RECOMMENDED APPROACH: Character-level tokenizer with learned embeddings
+    
+    Why this is good for tutorials:
+    1. Educational: Shows how tokenization works step-by-step
+    2. Deterministic: Same text always produces same embeddings (enables learning)
+    3. Learnable: Embeddings can be trained to capture text-video relationships
+    4. Simple: No external dependencies, works with any text
+    5. Transparent: Easy to understand and debug
+    
+    Alternative approaches (see comments below):
+    - Word-level tokenizer: More semantic but requires vocabulary building
+    - Bag-of-words: Simplest but loses sequence information
+    - Pre-trained models (CLIP/T5): Best quality but adds complexity
+    """
+    
+    def __init__(self, device="cuda", text_dim=128, text_len=77, vocab_size=256):
         super().__init__()
         self.device = device
         self.text_dim = text_dim
+        self.text_len = text_len
+        self.vocab_size = vocab_size
+        
+        # Character embedding lookup table (learnable)
+        # Maps character tokens (0-255 for ASCII) to embeddings
+        self.char_embedding = nn.Embedding(vocab_size, text_dim)
+        
+        # Learned projection layer for better representations
+        self.proj = nn.Sequential(
+            nn.Linear(text_dim, text_dim),
+            nn.GELU(),
+            nn.Linear(text_dim, text_dim)
+        )
+        
+        # Move all modules to the specified device
+        self.to(device)
+    
+    def _tokenize(self, text: str) -> list:
+        """Character-level tokenization.
+        
+        Converts each character to its ASCII/UTF-8 byte value (0-255).
+        This is deterministic - same text always produces same tokens.
+        
+        Example:
+            "A red circle" -> [65, 32, 114, 101, 100, 32, 99, 105, 114, 99, 108, 101]
+            "A" = 65, space = 32, "r" = 114, etc.
+        """
+        tokens = []
+        for char in text:
+            # Get character code (0-255 for ASCII, can handle UTF-8)
+            byte_val = ord(char)
+            # Clamp to vocab_size
+            token = min(byte_val, self.vocab_size - 1)
+            tokens.append(token)
+        return tokens
     
     def forward(self, text_prompts):
-        """Encode text prompts (simplified)."""
+        """Encode text prompts deterministically.
+        
+        Process:
+        1. Tokenize: Convert text to character tokens
+        2. Pad/Truncate: Ensure fixed length (text_len)
+        3. Embed: Lookup embeddings for each token
+        4. Project: Apply learned transformation
+        
+        Args:
+            text_prompts: List of text strings
+                Example: ["A red circle moving horizontally", "A blue square rotating"]
+            
+        Returns:
+            Dictionary with 'prompt_embeds' of shape [B, text_len, text_dim]
+        """
         batch_size = len(text_prompts)
-        # Return dummy embeddings matching TinyCausalWanModel's expected format
-        # Shape: [B, text_len, text_dim] where text_len=77 (standard)
-        text_len = 77
+        prompt_embeds_list = []
+        
+        for prompt in text_prompts:
+            # Step 1: Tokenize (text -> character tokens)
+            tokens = self._tokenize(prompt)
+            
+            # Step 2: Pad or truncate to fixed length
+            if len(tokens) < self.text_len:
+                # Pad with 0 (null character) - deterministic padding
+                tokens = tokens + [0] * (self.text_len - len(tokens))
+            else:
+                # Truncate to text_len
+                tokens = tokens[:self.text_len]
+            
+            # Step 3: Convert to tensor
+            token_tensor = torch.tensor(tokens, device=self.device, dtype=torch.long)  # [text_len]
+            
+            # Step 4: Lookup embeddings (learnable - this is what gets trained!)
+            embed_seq = self.char_embedding(token_tensor)  # [text_len, text_dim]
+            
+            # Step 5: Apply learned projection
+            embed_seq = self.proj(embed_seq)  # [text_len, text_dim]
+            
+            prompt_embeds_list.append(embed_seq)
+        
+        # Stack to create batch
+        prompt_embeds = torch.stack(prompt_embeds_list, dim=0)  # [B, text_len, text_dim]
+        
         return {
-            "prompt_embeds": torch.randn(
-                batch_size, text_len, self.text_dim, device=self.device
-            )
+            "prompt_embeds": prompt_embeds
         }
 
 
@@ -539,9 +626,12 @@ def main():
     print(f"   Model parameters: {sum(p.numel() for p in generator.parameters()):,}")
     print(f"   Using TinyCausalWanModel (transformer backbone)")
     
-    # Create optimizer
+    # Create text encoder (matching TinyCausalWanModel's text_dim)
+    text_encoder = SimpleTextEncoder(device=args.device, text_dim=128)
+    
+    # Create optimizer (include text encoder parameters so they can be trained)
     optimizer = torch.optim.AdamW(
-        generator.parameters(),
+        list(generator.parameters()) + list(text_encoder.parameters()),
         lr=args.lr,
         weight_decay=0.01
     )
@@ -560,9 +650,6 @@ def main():
         save_interval=args.save_interval,
         log_interval=args.log_interval
     )
-    
-    # Create text encoder (matching TinyCausalWanModel's text_dim)
-    text_encoder = SimpleTextEncoder(device=args.device, text_dim=128)
     
     # Training plotter
     plotter = TrainingPlotter(save_dir=str(Path(args.log_dir) / "plots"))
