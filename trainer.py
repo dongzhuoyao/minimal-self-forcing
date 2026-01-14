@@ -183,13 +183,13 @@ class SimplifiedTrainer:
         
         # Compute Self-Forcing loss
         # Self-Forcing is data-free: it does NOT use ground truth videos.
-        # Instead, it uses distribution matching (DMD/SiD/CausVid) to match
-        # the distribution of generated videos to real videos.
-        # 
-        # In the full implementation, this would use a discriminator/score network
-        # for distribution matching. For tutorial, we use a simplified loss that
-        # encourages temporal consistency and reasonable values.
-        loss = self._compute_self_forcing_loss(generated_video, prompts)
+        # Uses DMD (Distribution Matching Distillation) for distribution matching.
+        loss = self._compute_self_forcing_loss(
+            generated_video, 
+            prompts,
+            conditional_dict=conditional_dict,
+            use_dmd=self.use_dmd_loss
+        )
         
         # Backward pass
         loss.backward()
@@ -365,48 +365,132 @@ class SimplifiedTrainer:
     def _compute_self_forcing_loss(
         self,
         generated_video: torch.Tensor,
-        prompts: list
+        prompts: list,
+        conditional_dict: Optional[Dict[str, torch.Tensor]] = None,
+        use_dmd: bool = True
     ) -> torch.Tensor:
         """
         Compute Self-Forcing loss.
         
         Self-Forcing is data-free and does NOT require ground truth videos.
-        In the full implementation, this would use distribution matching:
-        - DMD (Distribution Matching Distillation)
-        - SiD (Score Identity Distillation)  
-        - CausVid (Causal Video model)
-        
-        These methods use a discriminator/score network to match distributions
-        rather than matching individual pixels to ground truth.
-        
-        For tutorial, we use a simplified version that encourages:
-        - Temporal consistency (smooth transitions between frames)
-        - Regularization (reasonable values)
+        Uses DMD (Distribution Matching Distillation) for distribution matching.
         
         Args:
-            generated_video: Generated video tensor
+            generated_video: Generated video tensor [B, F, C, H, W]
             prompts: List of text prompts
+            conditional_dict: Conditional information (text embeddings)
+            use_dmd: If True, use DMD loss; if False, use simplified temporal loss
         
         Returns:
             Loss tensor
         """
-        # Simplified: use a simple regularization loss
-        # In practice, this would use a discriminator or score network
+        if use_dmd:
+            return self._compute_dmd_loss(generated_video, conditional_dict, prompts)
+        else:
+            # Fallback: simplified temporal consistency loss
+            temporal_loss = 0.0
+            for t in range(generated_video.shape[1] - 1):
+                frame_diff = generated_video[:, t+1] - generated_video[:, t]
+                temporal_loss += torch.mean(frame_diff ** 2)
+            temporal_loss = temporal_loss / (generated_video.shape[1] - 1)
+            
+            reg_loss = torch.mean(generated_video ** 2)
+            return temporal_loss + 0.1 * reg_loss
+    
+    def _compute_dmd_loss(
+        self,
+        generated_video: torch.Tensor,
+        conditional_dict: Optional[Dict[str, torch.Tensor]],
+        prompts: list
+    ) -> torch.Tensor:
+        """
+        Compute DMD (Distribution Matching Distillation) loss.
         
-        # Temporal consistency loss (encourage smooth transitions)
-        temporal_loss = 0.0
-        for t in range(generated_video.shape[1] - 1):
-            frame_diff = generated_video[:, t+1] - generated_video[:, t]
-            temporal_loss += torch.mean(frame_diff ** 2)
-        temporal_loss = temporal_loss / (generated_video.shape[1] - 1)
+        Simplified version for tutorial:
+        - Uses generator itself as score network (self-distillation)
+        - Computes DMD gradient and matches distributions
         
-        # Regularization loss (encourage reasonable values)
-        reg_loss = torch.mean(generated_video ** 2)
+        Based on DMD paper: https://arxiv.org/abs/2311.18828
         
-        # Combined loss
-        total_loss = temporal_loss + 0.1 * reg_loss
+        Args:
+            generated_video: Generated video tensor [B, F, C, H, W]
+            conditional_dict: Conditional information (text embeddings)
+            prompts: List of text prompts
         
-        return total_loss
+        Returns:
+            DMD loss tensor
+        """
+        original_latent = generated_video
+        batch_size, num_frames = generated_video.shape[:2]
+        device = generated_video.device
+        
+        # Create unconditional dict (null/empty embeddings)
+        if conditional_dict is None:
+            # Create dummy conditional dict if not provided
+            conditional_dict = {
+                "text_embeddings": torch.randn(
+                    batch_size, 77, 128, device=device
+                )
+            }
+        
+        unconditional_dict = {
+            "text_embeddings": torch.zeros_like(conditional_dict["text_embeddings"])
+        }
+        
+        # Step 1: Randomly sample timestep for DMD
+        # Sample from [20, 980] range (avoiding extremes)
+        min_timestep = 20
+        max_timestep = 980
+        timestep = torch.randint(
+            min_timestep, max_timestep + 1,
+            (batch_size, num_frames),
+            device=device,
+            dtype=torch.long
+        )
+        
+        # Step 2: Add noise to generated video
+        noise = torch.randn_like(generated_video)
+        noisy_latent = self.scheduler.add_noise(
+            generated_video.flatten(0, 1),
+            noise.flatten(0, 1),
+            timestep.flatten(0, 1)
+        ).unflatten(0, (batch_size, num_frames))
+        
+        # Step 3: Compute KL gradient using generator as score network
+        # In full DMD, this would use separate real_score and fake_score networks
+        # For tutorial, we use generator itself (self-distillation)
+        with torch.no_grad():
+            # Conditional prediction
+            _, pred_cond = self.generator(noisy_latent, timestep, conditional_dict)
+            
+            # Unconditional prediction (for classifier-free guidance)
+            _, pred_uncond = self.generator(noisy_latent, timestep, unconditional_dict)
+            
+            # Classifier-free guidance (simplified, guidance_scale=1.0)
+            guidance_scale = 1.0
+            pred_score = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
+        
+        # Step 4: Compute DMD gradient
+        # DMD gradient = difference between fake and real scores
+        # In simplified version: gradient = prediction difference
+        grad = pred_score - original_latent.detach()
+        
+        # Step 5: Normalize gradient (DMD paper eq. 8)
+        p_real = (original_latent - pred_score.detach())
+        normalizer = torch.abs(p_real).mean(dim=[1, 2, 3, 4], keepdim=True)
+        normalizer = normalizer.clamp(min=1e-8)  # Avoid division by zero
+        grad = grad / normalizer
+        grad = torch.nan_to_num(grad)
+        
+        # Step 6: Compute DMD loss (DMD paper eq. 7)
+        # Loss = 0.5 * MSE(original_latent, original_latent - grad)
+        dmd_loss = 0.5 * torch.nn.functional.mse_loss(
+            original_latent,
+            (original_latent - grad).detach(),
+            reduction='mean'
+        )
+        
+        return dmd_loss
     
     def train(
         self,

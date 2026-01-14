@@ -101,3 +101,9 @@ For more detailed information, see the documentation in the `markdown/` folder:
 - **Video Generation**: Generate videos from text prompts
 - **Evaluation Metrics**: Simple metrics for assessing video quality
 - **Visualization Tools**: Visualize videos and training progress
+
+
+# Update
+
+- using pretrained checkpoints 
+- check the upper bound of VAE for frame reconstruction; using Video-VAE
