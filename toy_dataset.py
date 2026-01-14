@@ -7,8 +7,8 @@ No external video data is required - everything is generated programmatically.
 
 import numpy as np
 import torch
-from PIL import Image, ImageDraw, ImageFont
-from typing import List, Tuple, Optional
+from PIL import Image, ImageDraw
+from typing import List, Tuple
 import json
 import os
 

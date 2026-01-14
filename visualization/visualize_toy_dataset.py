@@ -22,7 +22,6 @@ from visualization import (
     save_video_frames,
     tensor_to_numpy
 )
-import matplotlib.pyplot as plt
 
 
 def visualize_toy_dataset(

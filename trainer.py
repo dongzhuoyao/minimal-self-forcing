@@ -10,8 +10,6 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from typing import Dict, Optional
 from pathlib import Path
-import os
-import sys
 import argparse
 from tqdm import tqdm
 

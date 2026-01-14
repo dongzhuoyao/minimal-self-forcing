@@ -10,7 +10,7 @@ import torch.nn as nn
 import argparse
 from pathlib import Path
 import sys
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 
 # Add root directory to path
 root_dir = Path(__file__).parent.parent
