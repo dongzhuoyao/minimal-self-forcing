@@ -40,14 +40,14 @@ class SimplifiedTrainer:
         generator: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: object,
-        device: str = "cuda",
-        log_dir: str = "logs/training",
-        save_interval: int = 10,
-        log_interval: int = 5,
-        viz_interval: int = 100,
         config: Optional[Dict] = None,
-        use_wandb: bool = False,
-        wandb_project: str = "self-forcing",
+        device: Optional[str] = None,
+        log_dir: Optional[str] = None,
+        save_interval: Optional[int] = None,
+        log_interval: Optional[int] = None,
+        viz_interval: Optional[int] = None,
+        use_wandb: Optional[bool] = None,
+        wandb_project: Optional[str] = None,
         wandb_entity: Optional[str] = None,
         wandb_name: Optional[str] = None
     ):
@@ -56,45 +56,53 @@ class SimplifiedTrainer:
             generator: The video generation model
             optimizer: Optimizer for the generator
             scheduler: Noise scheduler
-            device: Device to train on
-            log_dir: Directory to save logs and checkpoints
-            save_interval: Save checkpoint every N steps
-            log_interval: Log metrics every N steps
-            viz_interval: Generate and save sample videos every N steps
-            config: Optional config dictionary with hyperparameters
-            use_wandb: Whether to use Weights & Biases for logging
-            wandb_project: W&B project name
-            wandb_entity: W&B entity/team name (optional)
-            wandb_name: W&B run name (optional)
+            config: Config dictionary with hyperparameters (used to fill in missing values)
+            device: Device to train on (overrides config if provided)
+            log_dir: Directory to save logs and checkpoints (overrides config if provided)
+            save_interval: Save checkpoint every N steps (overrides config if provided)
+            log_interval: Log metrics every N steps (overrides config if provided)
+            viz_interval: Generate and save sample videos every N steps (overrides config if provided)
+            use_wandb: Whether to use Weights & Biases for logging (overrides config if provided)
+            wandb_project: W&B project name (overrides config if provided)
+            wandb_entity: W&B entity/team name (overrides config if provided)
+            wandb_name: W&B run name (overrides config if provided)
         """
-        self.generator = generator.to(device)
-        self.optimizer = optimizer
-        self.scheduler = scheduler
-        self.device = device
-        self.log_dir = Path(log_dir)
-        self.save_interval = save_interval
-        self.log_interval = log_interval
-        self.viz_interval = viz_interval
+        # Extract values from config if not provided
+        if config is None:
+            config = {}
+        
+        training_cfg = config.get('training', {})
+        paths_cfg = config.get('paths', {})
+        wandb_cfg = config.get('wandb', {})
+        
+        # Use provided values or fall back to config, then defaults
+        self.device = device or config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+        self.log_dir = Path(log_dir or paths_cfg.get('log_dir', 'logs/training'))
+        self.save_interval = save_interval or training_cfg.get('save_interval', 10)
+        self.log_interval = log_interval or training_cfg.get('log_interval', 5)
+        self.viz_interval = viz_interval or training_cfg.get('viz_interval', 100)
+        
+        # Wandb settings
+        if use_wandb is None:
+            use_wandb = wandb_cfg.get('enabled', False)
         self.use_wandb = use_wandb and WANDB_AVAILABLE
         
-        # Load config values if provided
-        if config:
-            training_cfg = config.get('training', {})
-            self.num_frames_per_block = training_cfg.get('num_frames_per_block', 3)
-            self.denoising_steps = training_cfg.get('denoising_steps', [1000, 750, 500, 250])
-            self.context_noise = training_cfg.get('context_noise', 0)
-            self.training_num_frames = training_cfg.get('num_frames', 21)
-            self.video_height = training_cfg.get('video_height', 64)
-            self.video_width = training_cfg.get('video_width', 64)
-            self.gradient_clip_norm = training_cfg.get('gradient_clip_norm', 1.0)
-        else:
-            self.num_frames_per_block = 3
-            self.denoising_steps = [1000, 750, 500, 250]
-            self.context_noise = 0
-            self.training_num_frames = 21
-            self.video_height = 64
-            self.video_width = 64
-            self.gradient_clip_norm = 1.0
+        wandb_project = wandb_project or wandb_cfg.get('project', 'self-forcing')
+        wandb_entity = wandb_entity if wandb_entity is not None else wandb_cfg.get('entity', None)
+        wandb_name = wandb_name if wandb_name is not None else wandb_cfg.get('name', None)
+        
+        self.generator = generator.to(self.device)
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        
+        # Load training config values
+        self.num_frames_per_block = training_cfg.get('num_frames_per_block', 3)
+        self.denoising_steps = training_cfg.get('denoising_steps', [1000, 750, 500, 250])
+        self.context_noise = training_cfg.get('context_noise', 0)
+        self.training_num_frames = training_cfg.get('num_frames', 21)
+        self.video_height = training_cfg.get('video_height', 64)
+        self.video_width = training_cfg.get('video_width', 64)
+        self.gradient_clip_norm = training_cfg.get('gradient_clip_norm', 1.0)
         
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -115,8 +123,8 @@ class SimplifiedTrainer:
             wandb.init(
                 project=wandb_project,
                 entity=wandb_entity,
-                name=wandb_name or f"self-forcing-{Path(log_dir).name}",
-                config=config or {},
+                name=wandb_name or f"self-forcing-{self.log_dir.name}",
+                config=config,
                 dir=str(self.log_dir)
             )
             # Log model architecture info
@@ -127,7 +135,7 @@ class SimplifiedTrainer:
                 "trainable_parameters": trainable_params,
                 "device": device
             })
-            print(f"Initialized wandb: project={wandb_project}, name={wandb_name or Path(log_dir).name}")
+            print(f"Initialized wandb: project={wandb_project}, name={wandb_name or self.log_dir.name}")
         elif use_wandb and not WANDB_AVAILABLE:
             print("Warning: wandb requested but not installed. Install with: pip install wandb")
     
@@ -952,28 +960,23 @@ def main():
     # Create scheduler
     scheduler = SimpleScheduler()
     
-    # Get wandb settings from config (command-line args override config)
-    use_wandb = args.use_wandb or wandb_cfg.get('enabled', False)
-    wandb_project = args.wandb_project if args.wandb_project is not None else wandb_cfg.get('project', 'self-forcing')
-    wandb_entity = args.wandb_entity if args.wandb_entity is not None else wandb_cfg.get('entity', None)
-    wandb_name = args.wandb_name if args.wandb_name is not None else wandb_cfg.get('name', None)
-    
-    # Create trainer
+    # Create trainer (most values come from config, command-line args override)
     print("\n3. Creating trainer...")
     trainer = SimplifiedTrainer(
         generator=generator,
         optimizer=optimizer,
         scheduler=scheduler,
-        device=device,
-        log_dir=log_dir,
-        save_interval=save_interval,
-        log_interval=log_interval,
-        viz_interval=viz_interval,
         config=config,
-        use_wandb=use_wandb,
-        wandb_project=wandb_project,
-        wandb_entity=wandb_entity,
-        wandb_name=wandb_name
+        # Command-line args override config values
+        device=getattr(args, 'device', None),
+        log_dir=getattr(args, 'log_dir', None),
+        save_interval=getattr(args, 'save_interval', None),
+        log_interval=getattr(args, 'log_interval', None),
+        viz_interval=None,  # Not exposed as CLI arg, use config
+        use_wandb=getattr(args, 'use_wandb', None),
+        wandb_project=getattr(args, 'wandb_project', None),
+        wandb_entity=getattr(args, 'wandb_entity', None),
+        wandb_name=getattr(args, 'wandb_name', None)
     )
     
     # Training plotter

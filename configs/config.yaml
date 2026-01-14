@@ -70,7 +70,7 @@ seed: 42                      # Random seed for reproducibility
 wandb:
   enabled: true              # Enable wandb logging (set to true to enable)
   project: "self-forcing"     # W&B project name
-  entity: dpose                # W&B entity/team name (null for personal account)
+  entity: dpose-team                # W&B entity/team name (null for personal account)
   name: null                  # W&B run name (null to auto-generate from log_dir)
 
 # Visualization Prompts (for sample generation during training)
