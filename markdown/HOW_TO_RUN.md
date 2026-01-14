@@ -244,7 +244,7 @@ Currently, generation/inference is done via Python code using the Self-Forcing p
 
 ```python
 import torch
-from algorithm import SimplifiedSelfForcingPipeline
+from generate import SimplifiedSelfForcingPipeline
 from tiny_causal_wan import TinyCausalWanModel
 from trainer import SimpleScheduler, SimpleTextEncoder
 
@@ -409,7 +409,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "original_impl"))
 
-from algorithm import SimplifiedSelfForcingPipeline
+from generate import SimplifiedSelfForcingPipeline
 from tiny_causal_wan import TinyCausalWanModel
 from trainer import SimpleScheduler, SimpleTextEncoder
 from visualization import create_video_gif, save_video_grid
@@ -557,4 +557,4 @@ After running commands, you'll typically have:
 
 - Check `.README.md` for more details
 - See `.QUICK_START.md` for quick examples
-- Review `.algorithm/README.md` for algorithm details
+- Review `generate.py` for algorithm implementation details

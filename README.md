@@ -77,7 +77,6 @@ For more detailed information, see the documentation in the `markdown/` folder:
 ## Directory Structure
 
 ```
-├── algorithm/          # Self-Forcing algorithm implementation
 ├── visualization/     # Visualization tools
 ├── configs/           # Configuration files
 ├── trainer.py         # Training script

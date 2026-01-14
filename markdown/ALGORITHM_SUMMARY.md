@@ -6,7 +6,7 @@ I've created a comprehensive **algorithm tutorial** that explains and demonstrat
 
 ## Components Created
 
-### 1. Core Algorithm (`tutorial/algorithm/self_forcing_algorithm.py`)
+### 1. Core Algorithm (`generate.py`)
 
 **SimplifiedSelfForcingPipeline**: The main algorithm implementation
 - Simulates inference during training
@@ -29,7 +29,7 @@ I've created a comprehensive **algorithm tutorial** that explains and demonstrat
 - Covers problem, solution, and algorithm flow
 - Perfect for learning
 
-### 2. Visualization Tools (`tutorial/algorithm/visualization.py`)
+### 2. Visualization Tools (`visualization/`)
 
 **Visualization Functions**:
 - `visualize_autoregressive_generation()`: Show block-by-block generation
@@ -72,15 +72,9 @@ Complete demonstration showing:
 
 ## Usage Examples
 
-### Understand the Algorithm
-```python
-from algorithm import explain_self_forcing
-print(explain_self_forcing())
-```
-
 ### Use the Pipeline
 ```python
-from algorithm import SimplifiedSelfForcingPipeline
+from generate import SimplifiedSelfForcingPipeline
 
 pipeline = SimplifiedSelfForcingPipeline(
     generator=your_model,
@@ -94,15 +88,14 @@ generated_video = pipeline.simulate_inference(noise, conditional_dict)
 
 ### Visualize Algorithm
 ```python
-from algorithm import create_algorithm_diagram, visualize_kv_cache_growth
+from visualization import create_video_gif, save_video_grid
 
-create_algorithm_diagram("outputs/diagram.png")
-visualize_kv_cache_growth(cache_sizes, "outputs/cache_growth.png")
+# Use visualization tools from visualization/ folder
 ```
 
-### Run Example
+### Run Generation
 ```bash
-python tutorial/examples/algorithm_example.py
+python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
 ```
 
 ## Educational Value
@@ -123,23 +116,17 @@ The algorithm tutorial connects to:
 ## Files Created
 
 ```
-tutorial/
-├── algorithm/
-│   ├── __init__.py
-│   ├── self_forcing_algorithm.py    # Core algorithm
-│   ├── visualization.py             # Visualization tools
-│   └── README.md                    # Algorithm docs
-├── examples/
-│   └── algorithm_example.py         # Demonstration script
+├── generate.py                      # Core algorithm (SimplifiedSelfForcingPipeline, SimpleKVCache)
+├── visualization/                   # Visualization tools
 └── README.md                         # Updated with algorithm section
 ```
 
 ## Next Steps
 
-1. **Read the explanation**: `explain_self_forcing()`
-2. **Run the example**: `python tutorial/examples/algorithm_example.py`
+1. **Read the code**: Check `generate.py` for `SimplifiedSelfForcingPipeline` implementation
+2. **Run generation**: `python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle"`
 3. **Experiment**: Try with toy dataset
-4. **Visualize**: Create your own visualizations
+4. **Visualize**: Use visualization tools in `visualization/` folder
 5. **Scale up**: Move to full implementation in `original_impl/`
 
 ## Key Differences from Full Implementation
