@@ -7,6 +7,9 @@ matplotlib>=3.5.0
 imageio>=2.9.0
 pyyaml>=6.0
 
+# Optional: For experiment tracking
+wandb>=0.15.0
+
 # Optional: For CLIP score evaluation
 # git+https://github.com/openai/CLIP.git
 

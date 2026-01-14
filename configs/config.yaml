@@ -66,6 +66,13 @@ paths:
 device: "cuda"                # Device to use (cuda/cpu, auto-detected if not available)
 seed: 42                      # Random seed for reproducibility
 
+# Weights & Biases (wandb) Configuration
+wandb:
+  enabled: true              # Enable wandb logging (set to true to enable)
+  project: "self-forcing"     # W&B project name
+  entity: dpose                # W&B entity/team name (null for personal account)
+  name: null                  # W&B run name (null to auto-generate from log_dir)
+
 # Visualization Prompts (for sample generation during training)
 viz_prompts:
   - "A red circle moving horizontally"

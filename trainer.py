@@ -13,10 +13,18 @@ from pathlib import Path
 import argparse
 import yaml
 from tqdm import tqdm
+import os
 
 from toy_dataset import ToyDataset
 from visualization import TrainingPlotter, create_video_gif, save_video_grid
 from tiny_causal_wan import TinyCausalWanModel
+
+# Optional wandb import
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 
 class SimplifiedTrainer:
@@ -37,7 +45,11 @@ class SimplifiedTrainer:
         save_interval: int = 10,
         log_interval: int = 5,
         viz_interval: int = 100,
-        config: Optional[Dict] = None
+        config: Optional[Dict] = None,
+        use_wandb: bool = False,
+        wandb_project: str = "self-forcing",
+        wandb_entity: Optional[str] = None,
+        wandb_name: Optional[str] = None
     ):
         """
         Args:
@@ -50,6 +62,10 @@ class SimplifiedTrainer:
             log_interval: Log metrics every N steps
             viz_interval: Generate and save sample videos every N steps
             config: Optional config dictionary with hyperparameters
+            use_wandb: Whether to use Weights & Biases for logging
+            wandb_project: W&B project name
+            wandb_entity: W&B entity/team name (optional)
+            wandb_name: W&B run name (optional)
         """
         self.generator = generator.to(device)
         self.optimizer = optimizer
@@ -59,6 +75,7 @@ class SimplifiedTrainer:
         self.save_interval = save_interval
         self.log_interval = log_interval
         self.viz_interval = viz_interval
+        self.use_wandb = use_wandb and WANDB_AVAILABLE
         
         # Load config values if provided
         if config:
@@ -92,6 +109,27 @@ class SimplifiedTrainer:
             "loss": [],
             "step": []
         }
+        
+        # Initialize wandb if requested
+        if self.use_wandb:
+            wandb.init(
+                project=wandb_project,
+                entity=wandb_entity,
+                name=wandb_name or f"self-forcing-{Path(log_dir).name}",
+                config=config or {},
+                dir=str(self.log_dir)
+            )
+            # Log model architecture info
+            total_params = sum(p.numel() for p in generator.parameters())
+            trainable_params = sum(p.numel() for p in generator.parameters() if p.requires_grad)
+            wandb.config.update({
+                "total_parameters": total_params,
+                "trainable_parameters": trainable_params,
+                "device": device
+            })
+            print(f"Initialized wandb: project={wandb_project}, name={wandb_name or Path(log_dir).name}")
+        elif use_wandb and not WANDB_AVAILABLE:
+            print("Warning: wandb requested but not installed. Install with: pip install wandb")
     
     def train_step(
         self,
@@ -439,9 +477,13 @@ class SimplifiedTrainer:
         self._save_metrics()
     
     def _log_metrics(self, metrics: Dict[str, float]):
-        """Log metrics (can be extended to use wandb, tensorboard, etc.)."""
+        """Log metrics to console and optionally to wandb."""
         if self.step % self.log_interval == 0:
             print(f"Step {self.step}: Loss = {metrics['loss']:.8f}")
+            
+            # Log to wandb
+            if self.use_wandb:
+                wandb.log(metrics, step=self.step)
     
     def _save_checkpoint(self, final: bool = False):
         """Save model checkpoint."""
@@ -539,6 +581,21 @@ class SimplifiedTrainer:
             save_video_grid(videos_list, str(grid_path), prompts=sample_prompts)
             
             print(f"  Saved sample videos to {self.samples_dir}")
+            
+            # Log to wandb
+            if self.use_wandb:
+                # Log grid image
+                wandb.log({
+                    "samples/grid": wandb.Image(str(grid_path)),
+                }, step=self.step)
+                
+                # Log individual videos as GIFs
+                for i, (video_tensor, prompt) in enumerate(zip(videos_list, sample_prompts)):
+                    gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
+                    wandb.log({
+                        f"samples/video_{i}": wandb.Video(str(gif_path), fps=8, format="gif"),
+                        f"samples/prompt_{i}": prompt
+                    }, step=self.step)
         
         self.generator.train()
     
@@ -742,6 +799,10 @@ def main():
     parser.add_argument("--save_interval", type=int, default=None, help="Save checkpoint every N steps (overrides config)")
     parser.add_argument("--log_interval", type=int, default=None, help="Log metrics every N steps (overrides config)")
     parser.add_argument("--device", type=str, default=None, help="Device (overrides config)")
+    parser.add_argument("--use_wandb", action="store_true", help="Use Weights & Biases for logging")
+    parser.add_argument("--wandb_project", type=str, default="self-forcing", help="W&B project name")
+    parser.add_argument("--wandb_entity", type=str, default=None, help="W&B entity/team name (optional)")
+    parser.add_argument("--wandb_name", type=str, default=None, help="W&B run name (optional)")
     
     args = parser.parse_args()
     
@@ -771,11 +832,20 @@ def main():
         config.setdefault('training', {})['log_interval'] = args.log_interval
     if args.device is not None:
         config['device'] = args.device
+    if args.use_wandb:
+        config.setdefault('wandb', {})['enabled'] = True
+    if args.wandb_project is not None:
+        config.setdefault('wandb', {})['project'] = args.wandb_project
+    if args.wandb_entity is not None:
+        config.setdefault('wandb', {})['entity'] = args.wandb_entity
+    if args.wandb_name is not None:
+        config.setdefault('wandb', {})['name'] = args.wandb_name
     
     # Extract config values with defaults
     model_cfg = config.get('model', {})
     training_cfg = config.get('training', {})
     paths_cfg = config.get('paths', {})
+    wandb_cfg = config.get('wandb', {})
     device = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
     seed = config.get('seed', 42)
     
@@ -882,6 +952,12 @@ def main():
     # Create scheduler
     scheduler = SimpleScheduler()
     
+    # Get wandb settings from config (command-line args override config)
+    use_wandb = args.use_wandb or wandb_cfg.get('enabled', False)
+    wandb_project = args.wandb_project if args.wandb_project is not None else wandb_cfg.get('project', 'self-forcing')
+    wandb_entity = args.wandb_entity if args.wandb_entity is not None else wandb_cfg.get('entity', None)
+    wandb_name = args.wandb_name if args.wandb_name is not None else wandb_cfg.get('name', None)
+    
     # Create trainer
     print("\n3. Creating trainer...")
     trainer = SimplifiedTrainer(
@@ -893,7 +969,11 @@ def main():
         save_interval=save_interval,
         log_interval=log_interval,
         viz_interval=viz_interval,
-        config=config
+        config=config,
+        use_wandb=use_wandb,
+        wandb_project=wandb_project,
+        wandb_entity=wandb_entity,
+        wandb_name=wandb_name
     )
     
     # Training plotter
@@ -985,12 +1065,18 @@ def main():
         num_frames_per_block=3
     )
     
+    # Finish wandb run
+    if trainer.use_wandb:
+        wandb.finish()
+    
     print("\n" + "=" * 70)
     print("Training completed!")
     print("=" * 70)
     print(f"\nCheckpoints saved to: {args.log_dir}")
     print(f"Plots saved to: {Path(args.log_dir) / 'plots'}")
     print(f"Sample videos saved to: {Path(args.log_dir) / 'samples'}")
+    if trainer.use_wandb:
+        print(f"W&B run completed (check wandb dashboard)")
     print("\nKey points:")
     print("1. Self-Forcing simulates inference during training")
     print("2. Videos are generated block-by-block autoregressively")
