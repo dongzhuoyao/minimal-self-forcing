@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from typing import Dict, Optional, List
 from pathlib import Path
 import argparse
+import yaml
 from tqdm import tqdm
 
 from toy_dataset import ToyDataset
@@ -35,7 +36,8 @@ class SimplifiedTrainer:
         log_dir: str = "logs/training",
         save_interval: int = 10,
         log_interval: int = 5,
-        viz_interval: int = 100
+        viz_interval: int = 100,
+        config: Optional[Dict] = None
     ):
         """
         Args:
@@ -47,6 +49,7 @@ class SimplifiedTrainer:
             save_interval: Save checkpoint every N steps
             log_interval: Log metrics every N steps
             viz_interval: Generate and save sample videos every N steps
+            config: Optional config dictionary with hyperparameters
         """
         self.generator = generator.to(device)
         self.optimizer = optimizer
@@ -56,6 +59,25 @@ class SimplifiedTrainer:
         self.save_interval = save_interval
         self.log_interval = log_interval
         self.viz_interval = viz_interval
+        
+        # Load config values if provided
+        if config:
+            training_cfg = config.get('training', {})
+            self.num_frames_per_block = training_cfg.get('num_frames_per_block', 3)
+            self.denoising_steps = training_cfg.get('denoising_steps', [1000, 750, 500, 250])
+            self.context_noise = training_cfg.get('context_noise', 0)
+            self.training_num_frames = training_cfg.get('num_frames', 21)
+            self.video_height = training_cfg.get('video_height', 64)
+            self.video_width = training_cfg.get('video_width', 64)
+            self.gradient_clip_norm = training_cfg.get('gradient_clip_norm', 1.0)
+        else:
+            self.num_frames_per_block = 3
+            self.denoising_steps = [1000, 750, 500, 250]
+            self.context_noise = 0
+            self.training_num_frames = 21
+            self.video_height = 64
+            self.video_width = 64
+            self.gradient_clip_norm = 1.0
         
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
