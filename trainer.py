@@ -764,7 +764,7 @@ def main():
     
     # Training hyperparameters
     num_steps = training_cfg.get('num_steps', 10000)
-    batch_size = training_cfg.get('batch_size', 64)
+    batch_size = training_cfg.get('batch_size', 16)
     lr = training_cfg.get('lr', 1e-4)
     weight_decay = training_cfg.get('weight_decay', 0.01)
     num_samples = training_cfg.get('num_samples', 20)

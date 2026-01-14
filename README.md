@@ -34,7 +34,7 @@ python trainer.py --num_steps 10000
 
 **Example:**
 ```bash
-python trainer.py --num_steps 10000 --batch_size 64 --lr 1e-4
+python trainer.py --num_steps 10000 --batch_size 16 --lr 1e-4
 ```
 
 ## Sampling/Generation
