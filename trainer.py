@@ -14,6 +14,7 @@ import argparse
 import yaml
 from tqdm import tqdm
 import os
+import numpy as np
 
 from toy_dataset import ToyDataset
 from visualization import TrainingPlotter, create_video_gif, save_video_grid
@@ -536,7 +537,8 @@ class SimplifiedTrainer:
         num_samples: int = 4,
         num_frames: int = 9,
         num_frames_per_block: int = 3,
-        prompts: Optional[List[str]] = None
+        prompts: Optional[List[str]] = None,
+        ground_truth_videos: Optional[torch.Tensor] = None
     ):
         """
         Generate sample videos for visualization during training.
@@ -547,6 +549,7 @@ class SimplifiedTrainer:
             num_frames: Number of frames per video
             num_frames_per_block: Frames per block for generation
             prompts: Optional list of prompts (uses defaults if None)
+            ground_truth_videos: Optional ground truth videos [B, F, C, H, W] to log alongside generated videos
         """
         self.generator.eval()
         
@@ -580,34 +583,111 @@ class SimplifiedTrainer:
             generated_videos = (generated_videos + 1.0) / 2.0
             generated_videos = generated_videos.clamp(0, 1)
             
-            # Save individual GIFs
+            # Process ground truth videos if provided
+            gt_videos_list = None
+            if ground_truth_videos is not None:
+                # Ensure ground truth is on correct device and has correct shape
+                if ground_truth_videos.device != self.device:
+                    ground_truth_videos = ground_truth_videos.to(self.device)
+                
+                # Ground truth videos are in [B, F, C, H, W] format
+                # Convert from [-1, 1] to [0, 1] if needed
+                if ground_truth_videos.min() < 0:
+                    ground_truth_videos = (ground_truth_videos + 1.0) / 2.0
+                ground_truth_videos = ground_truth_videos.clamp(0, 1)
+                
+                # Resize to match generated video dimensions if needed
+                if ground_truth_videos.shape[2:] != generated_videos.shape[2:]:
+                    # Resize spatial dimensions
+                    gt_resized = []
+                    for gt_vid in ground_truth_videos:
+                        # Resize each frame
+                        frames_resized = []
+                        for frame in gt_vid:
+                            frame_np = frame.permute(1, 2, 0).cpu().numpy()  # [H, W, C]
+                            from PIL import Image
+                            img = Image.fromarray((frame_np * 255).astype(np.uint8))
+                            target_size = (generated_videos.shape[-1], generated_videos.shape[-2])
+                            img_resized = img.resize(target_size, Image.Resampling.LANCZOS)
+                            frame_resized = torch.from_numpy(np.array(img_resized)).float() / 255.0
+                            frame_resized = frame_resized.permute(2, 0, 1)  # [C, H, W]
+                            frames_resized.append(frame_resized)
+                        gt_resized.append(torch.stack(frames_resized))
+                    ground_truth_videos = torch.stack(gt_resized).to(self.device)
+                
+                # Take matching number of frames
+                if ground_truth_videos.shape[1] != num_frames:
+                    ground_truth_videos = ground_truth_videos[:, :num_frames]
+                
+                # Limit to num_samples
+                ground_truth_videos = ground_truth_videos[:num_samples]
+                
+                gt_videos_list = []
+                for i, gt_video in enumerate(ground_truth_videos):
+                    gt_videos_list.append(gt_video)
+            
+            # Save individual GIFs for generated videos
             videos_list = []
             for i, video_tensor in enumerate(generated_videos):
                 gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                 create_video_gif(video_tensor, str(gif_path), fps=8)
                 videos_list.append(video_tensor)
             
-            # Save grid of all videos
+            # Save GIFs for ground truth videos if provided
+            gt_gif_paths = []
+            if gt_videos_list is not None:
+                for i, gt_video in enumerate(gt_videos_list):
+                    gt_gif_path = self.samples_dir / f"step_{self.step:06d}_gt_{i:02d}.gif"
+                    create_video_gif(gt_video, str(gt_gif_path), fps=8)
+                    gt_gif_paths.append(gt_gif_path)
+            
+            # Save grid of generated videos
             grid_path = self.samples_dir / f"step_{self.step:06d}_grid.png"
             save_video_grid(videos_list, str(grid_path), prompts=sample_prompts)
+            
+            # Save comparison grid if ground truth is available
+            comparison_grid_path = None
+            if gt_videos_list is not None:
+                comparison_grid_path = self.samples_dir / f"step_{self.step:06d}_comparison_grid.png"
+                # Create side-by-side comparison: generated | ground truth
+                comparison_videos = []
+                comparison_prompts = []
+                for gen_vid, gt_vid, prompt in zip(videos_list, gt_videos_list, sample_prompts):
+                    comparison_videos.append(gen_vid)
+                    comparison_videos.append(gt_vid)
+                    comparison_prompts.append(f"{prompt} (Generated)")
+                    comparison_prompts.append(f"{prompt} (Ground Truth)")
+                save_video_grid(comparison_videos, str(comparison_grid_path), prompts=comparison_prompts, ncols=2)
             
             print(f"  Saved sample videos to {self.samples_dir}")
             
             # Log to wandb
             if self.use_wandb:
-                # Log grid image
+                # Log grid image of generated videos
                 wandb.log({
                     "samples/grid": wandb.Image(str(grid_path)),
                 }, step=self.step)
                 
-                # Log individual videos as GIFs
-                # Note: fps parameter is not needed for GIF files (frame rate is encoded in the file)
+                # Log comparison grid if ground truth is available
+                if comparison_grid_path is not None:
+                    wandb.log({
+                        "samples/comparison_grid": wandb.Image(str(comparison_grid_path)),
+                    }, step=self.step)
+                
+                # Log individual generated videos as GIFs
                 for i, (video_tensor, prompt) in enumerate(zip(videos_list, sample_prompts)):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                     wandb.log({
-                        f"samples/video_{i}": wandb.Video(str(gif_path), format="gif"),
+                        f"samples/generated_video_{i}": wandb.Video(str(gif_path), format="gif"),
                         f"samples/prompt_{i}": prompt
                     }, step=self.step)
+                
+                # Log ground truth videos if available
+                if gt_gif_paths:
+                    for i, (gt_gif_path, prompt) in enumerate(zip(gt_gif_paths, sample_prompts)):
+                        wandb.log({
+                            f"samples/ground_truth_video_{i}": wandb.Video(str(gt_gif_path), format="gif"),
+                        }, step=self.step)
         
         self.generator.train()
     
@@ -1040,12 +1120,35 @@ def main():
                 "A yellow ball bouncing",
                 "Color gradient transitioning from red to blue"
             ])
+            
+            # Get ground truth videos from batch if available
+            ground_truth_videos = None
+            if "video" in batch:
+                # Batch contains ground truth videos
+                # DataLoader returns list of tensors, each is [F, C, H, W]
+                batch_videos = batch["video"]
+                num_viz_samples = gen_cfg.get('num_viz_samples', 4)
+                
+                if isinstance(batch_videos, list):
+                    # Stack into tensor [B, F, C, H, W]
+                    # Each element in list is [F, C, H, W]
+                    batch_videos = [v.to(trainer.device) for v in batch_videos[:num_viz_samples]]
+                    if batch_videos:
+                        ground_truth_videos = torch.stack(batch_videos)  # [B, F, C, H, W]
+                elif isinstance(batch_videos, torch.Tensor):
+                    # Already a tensor, might be [B, F, C, H, W] or [F, C, H, W]
+                    ground_truth_videos = batch_videos[:num_viz_samples].to(trainer.device)
+                    if len(ground_truth_videos.shape) == 4:
+                        # If [F, C, H, W], add batch dimension
+                        ground_truth_videos = ground_truth_videos.unsqueeze(0)
+            
             trainer.generate_sample_videos(
                 text_encoder=text_encoder,
                 num_samples=gen_cfg.get('num_viz_samples', 4),
                 num_frames=gen_cfg.get('viz_num_frames', 9),
                 num_frames_per_block=num_frame_per_block,
-                prompts=viz_prompts
+                prompts=viz_prompts,
+                ground_truth_videos=ground_truth_videos
             )
         
         # Check if we've reached the target number of steps
@@ -1065,11 +1168,29 @@ def main():
     
     # Generate final sample videos
     print("\nGenerating final sample videos...")
+    # Try to get ground truth videos from a sample batch
+    ground_truth_videos = None
+    try:
+        sample_batch = next(iter(dataloader))
+        if "video" in sample_batch:
+            batch_videos = sample_batch["video"]
+            if isinstance(batch_videos, list):
+                batch_videos = [v.to(trainer.device) for v in batch_videos[:4]]
+                if batch_videos:
+                    ground_truth_videos = torch.stack(batch_videos)
+            elif isinstance(batch_videos, torch.Tensor):
+                ground_truth_videos = batch_videos[:4].to(trainer.device)
+                if len(ground_truth_videos.shape) == 4:
+                    ground_truth_videos = ground_truth_videos.unsqueeze(0)
+    except:
+        pass  # No ground truth available, that's okay
+    
     trainer.generate_sample_videos(
         text_encoder=text_encoder,
         num_samples=4,
         num_frames=9,
-        num_frames_per_block=3
+        num_frames_per_block=3,
+        ground_truth_videos=ground_truth_videos
     )
     
     # Finish wandb run
