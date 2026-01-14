@@ -643,9 +643,9 @@ class SimplifiedTrainer:
         if prompts is None:
             sample_prompts = [
                 "A red circle moving horizontally",
-                "A blue square rotating clockwise",
-                "A yellow ball bouncing",
-                "Color gradient transitioning from red to blue"
+                "A blue square rotating",
+                "A green triangle moving diagonally",
+                "A color gradient transitioning from red to blue"
             ][:num_samples]
         else:
             sample_prompts = prompts[:num_samples]
@@ -1224,9 +1224,9 @@ def main():
             gen_cfg = config.get('generation', {})
             viz_prompts = config.get('viz_prompts', [
                 "A red circle moving horizontally",
-                "A blue square rotating clockwise",
-                "A yellow ball bouncing",
-                "Color gradient transitioning from red to blue"
+                "A blue square moving vertically",
+                "A green triangle moving diagonally",
+                "A color gradient transitioning from red to blue"
             ])
             
             # Get ground truth videos from batch if available

@@ -78,6 +78,6 @@ wandb:
 # Visualization Prompts (for sample generation during training)
 viz_prompts:
   - "A red circle moving horizontally"
-  - "A blue square rotating clockwise"
-  - "A yellow ball bouncing"
-  - "Color gradient transitioning from red to blue"
+  - "A blue square moving vertically"
+  - "A green triangle moving diagonally"
+  - "A color gradient transitioning from red to blue"

@@ -8,9 +8,22 @@ No external video data is required - everything is generated programmatically.
 import numpy as np
 import torch
 from PIL import Image, ImageDraw
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import json
 import os
+from pathlib import Path
+
+# Import visualization functions (optional, will fail gracefully if not available)
+try:
+    from visualization import (
+        save_video_grid,
+        create_video_gif,
+        display_video,
+        save_video_frames
+    )
+    VISUALIZATION_AVAILABLE = True
+except ImportError:
+    VISUALIZATION_AVAILABLE = False
 
 
 class ToyVideoGenerator:
@@ -95,61 +108,9 @@ class ToyVideoGenerator:
             video[frame_idx] = np.array(img)
         
         color_name = self._color_to_name(color)
-        prompt = f"A {color_name} {shape} moving {direction}ly"
-        
-        return video, prompt
-    
-    def generate_rotating_shape(
-        self,
-        shape: str = "square",
-        color: Tuple[int, int, int] = (0, 0, 255),
-        rotation_direction: str = "clockwise"
-    ) -> Tuple[np.ndarray, str]:
-        """Generate a video of a rotating shape."""
-        video = np.zeros((self.num_frames, self.height, self.width, 3), dtype=np.uint8)
-        
-        center_x, center_y = self.width // 2, self.height // 2
-        angles = np.linspace(0, 360, self.num_frames)
-        if rotation_direction == "counterclockwise":
-            angles = -angles
-        
-        for frame_idx in range(self.num_frames):
-            img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            angle = np.radians(angles[frame_idx])
-            size = 40
-            
-            # Create rotated shape
-            if shape == "square":
-                corners = [
-                    (-size, -size), (size, -size),
-                    (size, size), (-size, size)
-                ]
-            else:  # circle
-                corners = [(size * np.cos(a), size * np.sin(a)) 
-                          for a in np.linspace(0, 2*np.pi, 8)]
-            
-            # Rotate and translate
-            rotated_corners = []
-            for cx, cy in corners:
-                rx = cx * np.cos(angle) - cy * np.sin(angle) + center_x
-                ry = cx * np.sin(angle) + cy * np.cos(angle) + center_y
-                rotated_corners.append((rx, ry))
-            
-            if shape == "square":
-                draw.polygon(rotated_corners, fill=color)
-            else:
-                draw.ellipse(
-                    [center_x - size, center_y - size,
-                     center_x + size, center_y + size],
-                    fill=color
-                )
-            
-            video[frame_idx] = np.array(img)
-        
-        color_name = self._color_to_name(color)
-        prompt = f"A {color_name} {shape} rotating {rotation_direction}"
+        # Convert direction to adverb form
+        direction_word = "horizontally" if direction == "horizontal" else "vertically" if direction == "vertical" else "diagonally"
+        prompt = f"A {color_name} {shape} moving {direction_word}"
         
         return video, prompt
     
@@ -173,44 +134,7 @@ class ToyVideoGenerator:
         
         start_name = self._color_to_name(start_color)
         end_name = self._color_to_name(end_color)
-        prompt = f"Color gradient transitioning from {start_name} to {end_name}"
-        
-        return video, prompt
-    
-    def generate_bouncing_ball(
-        self,
-        color: Tuple[int, int, int] = (255, 255, 0)
-    ) -> Tuple[np.ndarray, str]:
-        """Generate a video of a bouncing ball."""
-        video = np.zeros((self.num_frames, self.height, self.width, 3), dtype=np.uint8)
-        
-        radius = 20
-        ground_y = self.height - 30
-        
-        for frame_idx in range(self.num_frames):
-            t = frame_idx / (self.num_frames - 1)
-            # Simple bouncing motion
-            x = int(self.width * t)
-            # Parabolic bounce
-            bounce_height = 100 * np.sin(np.pi * t)
-            y = int(ground_y - bounce_height - radius)
-            
-            img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            # Draw ground
-            draw.line([(0, ground_y), (self.width, ground_y)], fill=(100, 100, 100), width=2)
-            
-            # Draw ball
-            draw.ellipse(
-                [x - radius, y - radius, x + radius, y + radius],
-                fill=color
-            )
-            
-            video[frame_idx] = np.array(img)
-        
-        color_name = self._color_to_name(color)
-        prompt = f"A {color_name} ball bouncing"
+        prompt = f"A color gradient transitioning from {start_name} to {end_name}"
         
         return video, prompt
     
@@ -264,9 +188,7 @@ class ToyDataset:
             # Randomly select animation type
             anim_type = np.random.choice([
                 "moving_shape",
-                "rotating_shape",
-                "color_transition",
-                "bouncing_ball"
+                "color_transition"
             ])
             
             if anim_type == "moving_shape":
@@ -277,24 +199,12 @@ class ToyDataset:
                     shape, color, direction
                 )
             
-            elif anim_type == "rotating_shape":
-                shape = np.random.choice(["circle", "square"])
-                color = self._random_color()
-                direction = np.random.choice(["clockwise", "counterclockwise"])
-                video, prompt = self.generator.generate_rotating_shape(
-                    shape, color, direction
-                )
-            
-            elif anim_type == "color_transition":
+            else:  # color_transition
                 start_color = self._random_color()
                 end_color = self._random_color()
                 video, prompt = self.generator.generate_color_transition(
                     start_color, end_color
                 )
-            
-            else:  # bouncing_ball
-                color = self._random_color()
-                video, prompt = self.generator.generate_bouncing_ball(color)
             
             self.videos.append(video)
             self.prompts.append(prompt)
@@ -354,17 +264,223 @@ class ToyDataset:
         with open(output_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         print(f"Saved metadata to {output_path}")
+    
+    def visualize(
+        self,
+        num_samples: Optional[int] = None,
+        output_dir: str = "outputs/toy_dataset_visualization",
+        save_gifs: bool = True,
+        save_grid: bool = True,
+        save_frames: bool = True,
+        display: bool = False
+    ):
+        """
+        Visualize videos from the dataset.
+        
+        Args:
+            num_samples: Number of samples to visualize (None = all)
+            output_dir: Directory to save visualizations
+            save_gifs: Whether to save individual GIFs
+            save_grid: Whether to save video grid
+            save_frames: Whether to save individual frames for first video
+            display: Whether to display videos interactively
+        
+        Returns:
+            Tuple of (videos_list, prompts_list)
+        """
+        if not VISUALIZATION_AVAILABLE:
+            print("Warning: Visualization functions not available. Install required packages.")
+            return [], []
+        
+        # Create output directory
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Determine number of samples
+        if num_samples is None:
+            num_samples = len(self)
+        num_samples = min(num_samples, len(self))
+        
+        print(f"\nVisualizing {num_samples} videos from dataset...")
+        
+        # Collect videos and prompts
+        videos = []
+        prompts = []
+        
+        for i in range(num_samples):
+            sample = self[i]
+            # Convert from (T, C, H, W) to (B, T, C, H, W) for visualization functions
+            video = sample["video"].unsqueeze(0)  # Add batch dimension
+            
+            # Convert from [-1, 1] to [0, 1] for visualization
+            video_normalized = (video + 1.0) / 2.0
+            video_normalized = video_normalized.clamp(0, 1)
+            
+            videos.append(video_normalized)
+            prompts.append(sample["prompt"])
+            print(f"  Sample {i}: {sample['prompt']}")
+        
+        # Save video grid
+        if save_grid:
+            print(f"\n1. Saving video grid...")
+            grid_path = f"{output_dir}/video_grid.png"
+            save_video_grid(videos, grid_path, prompts=prompts, ncols=3)
+            print(f"   Saved: {grid_path}")
+        
+        # Create GIFs for each video
+        if save_gifs:
+            print(f"\n2. Creating GIFs...")
+            for i, (video, prompt) in enumerate(zip(videos, prompts)):
+                gif_path = f"{output_dir}/video_{i:03d}.gif"
+                create_video_gif(video, gif_path, fps=2)
+                print(f"   Saved GIF: {gif_path} ({prompt[:50]}...)")
+        
+        # Save individual frames for first video
+        if save_frames and len(videos) > 0:
+            print(f"\n3. Saving individual frames for first video...")
+            frames_dir = f"{output_dir}/frames_sample_0"
+            save_video_frames(videos[0], frames_dir)
+            print(f"   Saved frames to: {frames_dir}")
+        
+        # Display first video (if in interactive environment)
+        if display and len(videos) > 0:
+            print(f"\n4. Displaying first video...")
+            print(f"   Prompt: {prompts[0]}")
+            try:
+                display_video(videos[0], title=prompts[0])
+            except Exception as e:
+                print(f"   Note: Interactive display not available ({e})")
+                print(f"   Check the saved GIFs and frames instead!")
+        
+        print(f"\n✓ All visualizations saved to: {output_dir}")
+        return videos, prompts
+    
+    def visualize_single(
+        self,
+        idx: int = 0,
+        output_path: Optional[str] = None,
+        display: bool = False
+    ):
+        """
+        Visualize a single video from the dataset.
+        
+        Args:
+            idx: Index of the video in the dataset
+            output_path: Path to save the GIF (None = auto-generate)
+            display: Whether to display video interactively
+        
+        Returns:
+            Tuple of (video_tensor, prompt)
+        """
+        if not VISUALIZATION_AVAILABLE:
+            print("Warning: Visualization functions not available. Install required packages.")
+            return None, None
+        
+        if idx >= len(self):
+            print(f"Error: Index {idx} out of range (dataset has {len(self)} samples)")
+            return None, None
+        
+        # Get sample
+        sample = self[idx]
+        video = sample["video"].unsqueeze(0)  # Add batch dimension
+        prompt = sample["prompt"]
+        
+        # Convert from [-1, 1] to [0, 1] for visualization
+        video_normalized = (video + 1.0) / 2.0
+        video_normalized = video_normalized.clamp(0, 1)
+        
+        print(f"\nVisualizing video {idx}:")
+        print(f"  Prompt: {prompt}")
+        print(f"  Shape: {video_normalized.shape}")
+        
+        # Create GIF if output path provided
+        if output_path:
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            create_video_gif(video_normalized, output_path, fps=2)
+            print(f"  Saved GIF to: {output_path}")
+        
+        # Display
+        if display:
+            try:
+                display_video(video_normalized, title=prompt)
+            except Exception as e:
+                print(f"  Note: Interactive display not available ({e})")
+        
+        return video_normalized, prompt
 
 
 if __name__ == "__main__":
-    # Example usage
-    dataset = ToyDataset(num_samples=10, width=256, height=256, num_frames=16)
+    import argparse
     
-    # Save prompts
-    dataset.save_prompts("data/prompts/toy_prompts.txt")
-    dataset.save_metadata("data/toy_metadata.json")
+    parser = argparse.ArgumentParser(description="Toy Dataset Generator and Visualizer")
+    parser.add_argument("--num_samples", type=int, default=10,
+                       help="Number of samples to generate")
+    parser.add_argument("--width", type=int, default=64,
+                       help="Video width")
+    parser.add_argument("--height", type=int, default=64,
+                       help="Video height")
+    parser.add_argument("--num_frames", type=int, default=9,
+                       help="Number of frames per video")
+    parser.add_argument("--seed", type=int, default=42,
+                       help="Random seed")
+    parser.add_argument("--visualize", action="store_true",
+                       help="Visualize videos")
+    parser.add_argument("--num_viz", type=int, default=6,
+                       help="Number of videos to visualize")
+    parser.add_argument("--output_dir", type=str,
+                       default="outputs/toy_dataset_visualization",
+                       help="Output directory for visualizations")
+    parser.add_argument("--single", type=int, default=None,
+                       help="Visualize a single video by index")
+    parser.add_argument("--save_prompts", type=str, default=None,
+                       help="Path to save prompts file")
+    parser.add_argument("--save_metadata", type=str, default=None,
+                       help="Path to save metadata JSON file")
     
-    # Display first sample
+    args = parser.parse_args()
+    
+    # Create dataset
+    print("=" * 70)
+    print("Toy Dataset Generator")
+    print("=" * 70)
+    dataset = ToyDataset(
+        num_samples=args.num_samples,
+        width=args.width,
+        height=args.height,
+        num_frames=args.num_frames,
+        seed=args.seed
+    )
+    
+    print(f"\nGenerated {len(dataset)} videos")
     sample = dataset[0]
     print(f"Sample 0 prompt: {sample['prompt']}")
     print(f"Video shape: {sample['video'].shape}")
+    print(f"Video value range: [{sample['video'].min():.2f}, {sample['video'].max():.2f}]")
+    
+    # Save prompts if requested
+    if args.save_prompts:
+        dataset.save_prompts(args.save_prompts)
+    
+    # Save metadata if requested
+    if args.save_metadata:
+        dataset.save_metadata(args.save_metadata)
+    
+    # Visualize if requested
+    if args.visualize:
+        if args.single is not None:
+            # Visualize single video
+            output_path = f"{args.output_dir}/single_video_{args.single}.gif"
+            dataset.visualize_single(
+                idx=args.single,
+                output_path=output_path,
+                display=False
+            )
+        else:
+            # Visualize multiple videos
+            dataset.visualize(
+                num_samples=args.num_viz,
+                output_dir=args.output_dir,
+                save_gifs=True,
+                save_grid=True,
+                save_frames=True,
+                display=False
+            )
