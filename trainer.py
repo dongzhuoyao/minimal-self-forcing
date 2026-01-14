@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from data import ToyDataset
 from visualization import TrainingPlotter
-from model import TinyCausalWanModel
+from tiny_causal_wan import TinyCausalWanModel
 
 
 class SimplifiedTrainer:

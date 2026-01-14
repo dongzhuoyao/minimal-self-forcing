@@ -245,7 +245,7 @@ Currently, generation/inference is done via Python code using the Self-Forcing p
 ```python
 import torch
 from algorithm import SimplifiedSelfForcingPipeline
-from model import TinyCausalWanModel
+from tiny_causal_wan import TinyCausalWanModel
 from trainer import SimpleScheduler, SimpleTextEncoder
 
 # Setup device
@@ -410,7 +410,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "original_impl"))
 
 from algorithm import SimplifiedSelfForcingPipeline
-from model import TinyCausalWanModel
+from tiny_causal_wan import TinyCausalWanModel
 from trainer import SimpleScheduler, SimpleTextEncoder
 from visualization import create_video_gif, save_video_grid
 

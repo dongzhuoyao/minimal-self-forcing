@@ -15,7 +15,7 @@ root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
 from algorithm import SimplifiedSelfForcingPipeline
-from model import TinyCausalWanModel
+from tiny_causal_wan import TinyCausalWanModel
 from trainer import SimpleScheduler, SimpleTextEncoder
 from visualization import create_video_gif, save_video_grid
 
