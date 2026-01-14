@@ -9,7 +9,7 @@ model:
   ffn_dim: 2048              # FFN dimension (increased from 1024)
   num_heads: 8                # Attention heads (increased from 4)
   num_layers: 6               # Transformer layers (increased from 4)
-  patch_size: [1, 2, 2]       # Patch size for embedding
+  patch_size: [1, 4, 4]       # Patch size for embedding (temporal, height, width)
   text_dim: 128               # Text embedding dimension
   freq_dim: 256               # Time embedding dimension
   num_frame_per_block: 3      # Frames per block for causal mask

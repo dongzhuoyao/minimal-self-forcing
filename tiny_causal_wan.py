@@ -105,7 +105,7 @@ class TinyCausalWanModel(nn.Module):
         ffn_dim=8192,  # FFN dimension (scaled 16x: 256 * 32 = 8192, 4x dim)
         num_heads=16,  # Attention heads (scaled 4x: 4 * 4 = 16)
         num_layers=4,  # Transformer layers (scaled 2x: 2 * 2 = 4)
-        patch_size=(1, 2, 2),  # Patch size for embedding
+        patch_size=(1, 4, 4),  # Patch size for embedding (temporal, height, width)
         text_dim=128,  # Text embedding dimension (simplified)
         freq_dim=256,  # Time embedding dimension
         num_frame_per_block=3,  # Frames per block for causal mask

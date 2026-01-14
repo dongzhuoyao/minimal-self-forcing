@@ -803,7 +803,7 @@ def main():
     model_ffn_dim = model_cfg.get('ffn_dim', 1024)
     model_num_heads = model_cfg.get('num_heads', 4)
     model_num_layers = model_cfg.get('num_layers', 4)
-    patch_size = tuple(model_cfg.get('patch_size', [1, 2, 2]))
+    patch_size = tuple(model_cfg.get('patch_size', [1, 4, 4]))
     text_dim = model_cfg.get('text_dim', 128)
     freq_dim = model_cfg.get('freq_dim', 256)
     num_frame_per_block = model_cfg.get('num_frame_per_block', 3)
