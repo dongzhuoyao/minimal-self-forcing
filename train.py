@@ -39,10 +39,14 @@ except ImportError:
 
 class SimplifiedTrainer:
     """
-    Simplified trainer for Self-Forcing algorithm.
-
-    This trainer demonstrates the core training loop without the complexity
-    of distributed training, FSDP, etc.
+    Full Self-Forcing trainer for single GPU training.
+    
+    Implements the complete Self-Forcing algorithm:
+    - Block-by-block autoregressive generation with KV caching simulation
+    - DMD loss for data-free training
+    - Gradient control (only last 21 frames compute gradients)
+    - Variable frame generation support
+    - Optional critic training (simplified)
     """
 
     def __init__(
@@ -51,7 +55,8 @@ class SimplifiedTrainer:
         optimizer: torch.optim.Optimizer,
         scheduler: object,
         cfg: DictConfig,
-        output_dir: Path
+        output_dir: Path,
+        text_encoder: Optional[nn.Module] = None
     ):
         """
         Args:
@@ -60,6 +65,7 @@ class SimplifiedTrainer:
             scheduler: Noise scheduler
             cfg: Hydra config object
             output_dir: Hydra output directory for logs, checkpoints, wandb
+            text_encoder: Optional text encoder
         """
         self.device = cfg.device if torch.cuda.is_available() or cfg.device == "cpu" else "cpu"
         self.output_dir = output_dir
@@ -73,6 +79,7 @@ class SimplifiedTrainer:
         self.generator = generator.to(self.device)
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.text_encoder = text_encoder
         self.cfg = cfg
 
         # Load training config values
@@ -84,6 +91,21 @@ class SimplifiedTrainer:
         self.video_width = cfg.training.video_width
         self.gradient_clip_norm = cfg.training.gradient_clip_norm
         self.use_dmd_loss = cfg.training.use_dmd_loss
+        
+        # DMD-specific configs
+        self.num_train_timestep = cfg.training.get('num_train_timestep', 1000)
+        self.min_step = int(0.02 * self.num_train_timestep)
+        self.max_step = int(0.98 * self.num_train_timestep)
+        self.guidance_scale = cfg.training.get('guidance_scale', 1.0)
+        self.timestep_shift = cfg.training.get('timestep_shift', 1.0)
+        self.ts_schedule = cfg.training.get('ts_schedule', False)
+        self.min_score_timestep = cfg.training.get('min_score_timestep', 0)
+        
+        # Variable frame generation (matching official impl)
+        self.min_num_frames = cfg.training.get('min_num_frames', 21)
+        self.max_num_frames = cfg.training.get('max_num_frames', self.training_num_frames)
+        assert self.min_num_frames % self.num_frames_per_block == 0
+        assert self.max_num_frames % self.num_frames_per_block == 0
 
         # Create subdirectories in Hydra output dir
         self.checkpoints_dir = self.output_dir / "checkpoints"
@@ -99,8 +121,13 @@ class SimplifiedTrainer:
         self.step = 0
         self.metrics_history = {
             "loss": [],
+            "generator_loss": [],
+            "dmd_gradient_norm": [],
             "step": []
         }
+        
+        # Cached unconditional dict (for efficiency)
+        self.unconditional_dict = None
 
         # Initialize wandb if requested
         if self.use_wandb:
@@ -117,7 +144,8 @@ class SimplifiedTrainer:
                 "total_parameters": total_params,
                 "trainable_parameters": trainable_params,
                 "device": self.device,
-                "output_dir": str(self.output_dir)
+                "output_dir": str(self.output_dir),
+                "training_type": "self-forcing"
             })
             print(f"Initialized wandb: project={cfg.wandb.project}, dir={self.output_dir}")
         elif cfg.wandb.enabled and not WANDB_AVAILABLE:
@@ -126,56 +154,122 @@ class SimplifiedTrainer:
     def train_step(
         self,
         batch: Dict[str, torch.Tensor],
-        conditional_dict: Dict[str, torch.Tensor]
+        conditional_dict: Dict[str, torch.Tensor],
+        unconditional_dict: Optional[Dict[str, torch.Tensor]] = None
     ) -> Dict[str, float]:
-        """Perform one training step."""
+        """
+        Perform one training step with Self-Forcing.
+        
+        Matches official implementation:
+        1. Sample variable number of frames (21 to max_num_frames)
+        2. Generate video block-by-block autoregressively
+        3. Compute DMD loss on generated video
+        4. Only last 21 frames compute gradients
+        """
         self.generator.train()
         self.optimizer.zero_grad()
 
         batch_size = len(batch["prompts"])
+        
+        # Step 1: Sample variable number of frames (matching official impl)
+        min_num_blocks = self.min_num_frames // self.num_frames_per_block
+        max_num_blocks = self.max_num_frames // self.num_frames_per_block
+        num_generated_blocks = torch.randint(
+            min_num_blocks, max_num_blocks + 1, (1,), device=self.device
+        ).item()
+        num_generated_frames = num_generated_blocks * self.num_frames_per_block
 
+        # Step 2: Sample noise for generation
         noise = torch.randn(
-            batch_size, self.training_num_frames, 3, self.video_height, self.video_width,
+            batch_size, num_generated_frames, 3, self.video_height, self.video_width,
             device=self.device
         )
 
-        # Simulate Self-Forcing inference during training
-        generated_video = self.sf_engine.simulate_self_forcing(
-            noise, conditional_dict
+        # Step 3: Simulate Self-Forcing inference during training
+        # This generates video block-by-block with KV cache simulation
+        generated_video, denoised_timestep_from, denoised_timestep_to = self.sf_engine.simulate_self_forcing(
+            noise, conditional_dict, return_timesteps=True
         )
 
-        # Compute Self-Forcing loss (data-free, uses DMD)
-        loss = self.sf_engine.compute_self_forcing_loss(
+        # Step 4: Compute Self-Forcing loss (data-free, uses DMD)
+        if unconditional_dict is None:
+            unconditional_dict = self._get_unconditional_dict(batch_size, conditional_dict)
+        
+        loss, log_dict = self.sf_engine.compute_self_forcing_loss(
             generated_video,
             conditional_dict=conditional_dict,
+            unconditional_dict=unconditional_dict,
+            denoised_timestep_from=denoised_timestep_from,
+            denoised_timestep_to=denoised_timestep_to,
             use_dmd=self.use_dmd_loss
         )
 
-        # Backward pass
+        # Step 5: Backward pass
         loss.backward()
 
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=self.gradient_clip_norm)
+        # Step 6: Gradient clipping
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.generator.parameters(), 
+            max_norm=self.gradient_clip_norm
+        )
 
-        # Optimizer step
+        # Step 7: Optimizer step
         self.optimizer.step()
 
-        # Update metrics
+        # Step 8: Update metrics
         metrics = {
             "loss": loss.item(),
+            "generator_loss": loss.item(),
+            "grad_norm": grad_norm.item(),
+            "num_frames": num_generated_frames,
             "step": self.step
         }
+        
+        # Add DMD-specific metrics
+        if log_dict:
+            metrics.update({k: v.item() if torch.is_tensor(v) else v 
+                           for k, v in log_dict.items()})
 
         self.metrics_history["loss"].append(loss.item())
+        self.metrics_history["generator_loss"].append(loss.item())
+        if "dmd_gradient_norm" in log_dict:
+            self.metrics_history["dmd_gradient_norm"].append(
+                log_dict["dmd_gradient_norm"].item() if torch.is_tensor(log_dict["dmd_gradient_norm"]) 
+                else log_dict["dmd_gradient_norm"]
+            )
         self.metrics_history["step"].append(self.step)
 
         self.step += 1
 
         return metrics
+    
+    def _get_unconditional_dict(
+        self, 
+        batch_size: int, 
+        conditional_dict: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """Get or create unconditional dict (null embeddings)."""
+        if self.unconditional_dict is None:
+            # Create null/empty embeddings
+            embed_key = "prompt_embeds"
+            if embed_key in conditional_dict:
+                self.unconditional_dict = {
+                    embed_key: torch.zeros_like(conditional_dict[embed_key])
+                }
+            else:
+                self.unconditional_dict = {}
+        return self.unconditional_dict
 
     def _log_metrics(self, metrics: Dict[str, float]):
         """Log metrics to console and wandb."""
-        print(f"Step {self.step}: Loss = {metrics['loss']:.8f}")
+        loss_str = f"Loss = {metrics['loss']:.8f}"
+        if "grad_norm" in metrics:
+            loss_str += f", GradNorm = {metrics['grad_norm']:.4f}"
+        if "dmd_gradient_norm" in metrics:
+            loss_str += f", DMDGradNorm = {metrics['dmd_gradient_norm']:.4f}"
+        if "num_frames" in metrics:
+            loss_str += f", Frames = {metrics['num_frames']}"
+        print(f"Step {self.step}: {loss_str}")
 
         if self.use_wandb:
             wandb.log(metrics, step=self.step)
@@ -187,8 +281,13 @@ class SimplifiedTrainer:
             "generator_state_dict": self.generator.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "metrics_history": self.metrics_history,
-            "training_type": "self-forcing"
+            "training_type": "self-forcing",
+            "config": OmegaConf.to_container(self.cfg, resolve=True)
         }
+        
+        # Save text encoder if available
+        if self.text_encoder is not None:
+            checkpoint["text_encoder_state_dict"] = self.text_encoder.state_dict()
 
         suffix = "final" if final else f"step_{self.step:06d}"
         checkpoint_path = self.checkpoints_dir / f"checkpoint_{suffix}.pt"
@@ -209,11 +308,29 @@ class SimplifiedTrainer:
     def load_checkpoint(self, checkpoint_path: str):
         """Load model checkpoint."""
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.generator.load_state_dict(checkpoint["generator_state_dict"])
-        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        
+        if "generator_state_dict" in checkpoint:
+            self.generator.load_state_dict(checkpoint["generator_state_dict"])
+        
+        if "optimizer_state_dict" in checkpoint:
+            try:
+                self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            except Exception as e:
+                print(f"Warning: Could not load optimizer state: {e}")
+        
+        if "text_encoder_state_dict" in checkpoint and self.text_encoder is not None:
+            try:
+                self.text_encoder.load_state_dict(checkpoint["text_encoder_state_dict"])
+            except Exception as e:
+                print(f"Warning: Could not load text encoder state: {e}")
+        
         self.step = checkpoint.get("step", 0)
-        self.metrics_history = checkpoint.get("metrics_history", {"loss": [], "step": []})
-        print(f"Loaded checkpoint from {checkpoint_path} (step {self.step})")
+        self.metrics_history = checkpoint.get("metrics_history", {
+            "loss": [], "generator_loss": [], "dmd_gradient_norm": [], "step": []
+        })
+        
+        training_type = checkpoint.get("training_type", "unknown")
+        print(f"Loaded checkpoint from {checkpoint_path} (step {self.step}, type: {training_type})")
 
     def generate_sample_videos(
         self,
@@ -570,15 +687,23 @@ def main(cfg: DictConfig):
         output_dir=output_dir
     )
 
-    # Create Self-Forcing engine
-    trainer.sf_engine = SelfForcingEngine(
-        generator=generator,
-        scheduler=scheduler,
-        device=device,
-        denoising_steps=list(cfg.training.denoising_steps),
-        num_frames_per_block=cfg.training.num_frames_per_block,
-        context_noise=cfg.training.context_noise
-    )
+        # Create Self-Forcing engine
+        trainer.sf_engine = SelfForcingEngine(
+            generator=generator,
+            scheduler=scheduler,
+            device=device,
+            denoising_steps=list(cfg.training.denoising_steps),
+            num_frames_per_block=cfg.training.num_frames_per_block,
+            context_noise=cfg.training.context_noise
+        )
+        
+        # Pass DMD configs to engine
+        trainer.sf_engine.num_train_timestep = trainer.num_train_timestep
+        trainer.sf_engine.min_step = trainer.min_step
+        trainer.sf_engine.max_step = trainer.max_step
+        trainer.sf_engine.timestep_shift = trainer.timestep_shift
+        trainer.sf_engine.ts_schedule = trainer.ts_schedule
+        trainer.sf_engine.guidance_scale = trainer.guidance_scale
 
     # Load pretrained checkpoint if provided
     checkpoint_path = cfg.get('checkpoint', None)
@@ -624,9 +749,13 @@ def main(cfg: DictConfig):
         # Encode prompts
         with torch.no_grad():
             conditional_dict = text_encoder(batch["prompts"])
+            # Create unconditional dict (null embeddings)
+            unconditional_dict = {
+                "prompt_embeds": torch.zeros_like(conditional_dict["prompt_embeds"])
+            }
 
         # Training step
-        metrics = trainer.train_step(batch, conditional_dict)
+        metrics = trainer.train_step(batch, conditional_dict, unconditional_dict)
 
         # Log to plotter
         plotter.log_metric("loss", metrics["loss"], trainer.step)

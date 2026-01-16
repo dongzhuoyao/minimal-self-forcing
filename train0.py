@@ -9,6 +9,13 @@ Pretraining uses standard diffusion training:
 - Train model to denoise (predict clean video or noise)
 - This gives the model a good initialization before Self-Forcing
 
+Full implementation features:
+- Standard diffusion training with ground truth videos
+- Block-by-block processing support
+- Checkpoint saving compatible with train.py
+- Wandb integration for logging
+- Sample video generation during training
+
 Usage:
     python train0.py                           # Use default config
     python train0.py training.num_steps=2000   # Override config values
