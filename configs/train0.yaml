@@ -26,7 +26,7 @@ training:
   num_frames_per_block: 3      # Frames per block
   min_timestep: 0              # Minimum timestep for noise
   max_timestep: 1000           # Maximum timestep for noise
-  prediction_type: "sample"    # Prediction type: "sample" or "noise"
+  prediction_type: "flow"      # Prediction type: "flow" (Flow Matching), "sample", or "noise"
 
   # Training control
   save_interval: 1000           # Save checkpoint every N steps

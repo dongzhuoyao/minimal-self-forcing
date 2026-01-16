@@ -28,6 +28,11 @@ training:
   denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
   context_noise: 0             # Noise level for cache update
   use_dmd_loss: true           # Use DMD loss (true) or simplified temporal loss (false)
+  
+  # Flow Matching settings (model uses Flow Matching internally)
+  # Note: The model predicts flow, but current DMD implementation uses x0 predictions
+  # Original impl uses denoising_loss_type: flow for flow-based DMD loss
+  denoising_loss_type: "flow"  # Denoising loss type: "flow" (Flow Matching), "x0", "noise", or "v"
 
   # Training control
   save_interval: 1000         # Save checkpoint every N steps
