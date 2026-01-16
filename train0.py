@@ -150,16 +150,29 @@ class PretrainingTrainer:
 
         batch_size, num_frames = video.shape[:2]
 
-        # Sample random timestep for each sample in batch
+        # Sample random timestep per block (matching official implementation)
+        # Different blocks can have different timesteps, but frames within same block share timestep
+        num_blocks = num_frames // self.num_frames_per_block
+        assert num_frames % self.num_frames_per_block == 0, \
+            f"num_frames ({num_frames}) must be divisible by num_frames_per_block ({self.num_frames_per_block})"
+        
+        # Sample timestep for each frame initially [B, F]
         timesteps = torch.randint(
             self.min_timestep, self.max_timestep,
-            (batch_size,),
+            (batch_size, num_frames),
             device=self.device,
             dtype=torch.long
         )
-
-        # Expand timesteps to match video shape [B, F]
-        timesteps_expanded = timesteps.unsqueeze(1).expand(batch_size, num_frames)
+        
+        # Make timestep the same within each block (matching official impl)
+        # Reshape to [B, num_blocks, num_frames_per_block]
+        timesteps_expanded = timesteps.reshape(
+            batch_size, num_blocks, self.num_frames_per_block
+        )
+        # Copy first frame's timestep to all frames in the block
+        timesteps_expanded[:, :, 1:] = timesteps_expanded[:, :, 0:1]
+        # Reshape back to [B, F]
+        timesteps_expanded = timesteps_expanded.reshape(batch_size, num_frames)
 
         # Sample noise
         noise = torch.randn_like(video)
