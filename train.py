@@ -53,8 +53,7 @@ class SimplifiedTrainer:
         optimizer: torch.optim.Optimizer,
         scheduler: object,
         cfg: DictConfig,
-        output_dir: Path,
-        text_encoder: Optional[nn.Module] = None
+        output_dir: Path
     ):
         """
         Args:
@@ -63,7 +62,6 @@ class SimplifiedTrainer:
             scheduler: Noise scheduler
             cfg: Hydra config object
             output_dir: Hydra output directory for logs, checkpoints, wandb
-            text_encoder: Optional text encoder
         """
         self.device = cfg.device if torch.cuda.is_available() or cfg.device == "cpu" else "cpu"
         self.output_dir = output_dir
@@ -77,7 +75,6 @@ class SimplifiedTrainer:
         self.generator = generator.to(self.device)
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.text_encoder = text_encoder
         self.cfg = cfg
 
         # Load training config values
@@ -127,9 +124,6 @@ class SimplifiedTrainer:
         # Moving average loss tracker (exponential moving average)
         self.average_loss = None
         self.smoothing_decay = 0.99  # EMA decay factor
-        
-        # Cached unconditional dict (for efficiency)
-        self.unconditional_dict = None
 
         # Initialize wandb if requested
         if self.use_wandb:
@@ -155,9 +149,7 @@ class SimplifiedTrainer:
 
     def train_step(
         self,
-        batch: Dict[str, torch.Tensor],
-        conditional_dict: Dict[str, torch.Tensor],
-        unconditional_dict: Optional[Dict[str, torch.Tensor]] = None
+        batch: Dict[str, torch.Tensor]
     ) -> Dict[str, float]:
         """
         Perform one training step with Self-Forcing.
@@ -171,7 +163,7 @@ class SimplifiedTrainer:
         self.generator.train()
         self.optimizer.zero_grad()
 
-        batch_size = len(batch["prompts"])
+        batch_size = batch["video"].shape[0] if "video" in batch else 1
         
         # Step 1: Sample variable number of frames (matching official impl)
         min_num_blocks = self.min_num_frames // self.num_frames_per_block
@@ -189,13 +181,15 @@ class SimplifiedTrainer:
 
         # Step 3: Simulate Self-Forcing inference during training
         # This generates video block-by-block with KV cache simulation
+        # Use empty conditional dict (model will create dummy embeddings if needed)
+        conditional_dict = {}
         generated_video, denoised_timestep_from, denoised_timestep_to = self.sf_engine.simulate_self_forcing(
             noise, conditional_dict, return_timesteps=True
         )
 
         # Step 4: Compute Self-Forcing loss (data-free, uses DMD)
-        if unconditional_dict is None:
-            unconditional_dict = self._get_unconditional_dict(batch_size, conditional_dict)
+        # Use empty unconditional dict (model will create dummy embeddings if needed)
+        unconditional_dict = {}
         
         loss, log_dict = self.sf_engine.compute_self_forcing_loss(
             generated_video,
@@ -254,22 +248,6 @@ class SimplifiedTrainer:
 
         return metrics
     
-    def _get_unconditional_dict(
-        self, 
-        batch_size: int, 
-        conditional_dict: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
-        """Get or create unconditional dict (null embeddings)."""
-        if self.unconditional_dict is None:
-            # Create null/empty embeddings
-            embed_key = "prompt_embeds"
-            if embed_key in conditional_dict:
-                self.unconditional_dict = {
-                    embed_key: torch.zeros_like(conditional_dict[embed_key])
-                }
-            else:
-                self.unconditional_dict = {}
-        return self.unconditional_dict
 
     def _log_metrics(self, metrics: Dict[str, float]):
         """Log metrics to console and wandb."""
@@ -297,10 +275,6 @@ class SimplifiedTrainer:
             "training_type": "self-forcing",
             "config": OmegaConf.to_container(self.cfg, resolve=True)
         }
-        
-        # Save text encoder if available
-        if self.text_encoder is not None:
-            checkpoint["text_encoder_state_dict"] = self.text_encoder.state_dict()
 
         suffix = "final" if final else f"step_{self.step:06d}"
         checkpoint_path = self.checkpoints_dir / f"checkpoint_{suffix}.pt"
@@ -331,12 +305,6 @@ class SimplifiedTrainer:
             except Exception as e:
                 print(f"Warning: Could not load optimizer state: {e}")
         
-        if "text_encoder_state_dict" in checkpoint and self.text_encoder is not None:
-            try:
-                self.text_encoder.load_state_dict(checkpoint["text_encoder_state_dict"])
-            except Exception as e:
-                print(f"Warning: Could not load text encoder state: {e}")
-        
         self.step = checkpoint.get("step", 0)
         self.metrics_history = checkpoint.get("metrics_history", {
             "loss": [], "generator_loss": [], "dmd_gradient_norm": [], "step": []
@@ -347,7 +315,6 @@ class SimplifiedTrainer:
 
     def generate_sample_videos(
         self,
-        text_encoder: nn.Module,
         num_samples: int = 4,
         num_frames: int = 9,
         num_frames_per_block: int = 3,
@@ -358,34 +325,29 @@ class SimplifiedTrainer:
         """Generate sample videos for visualization during training.
         
         Args:
-            text_encoder: Text encoder model
             num_samples: Number of videos to generate
             num_frames: Number of frames per video
             num_frames_per_block: Frames per block for autoregressive generation
-            digits: List of digit labels (0-9) to visualize. If None, uses empty strings.
+            digits: List of digit labels (0-9) to visualize. If None, uses empty labels.
             ground_truth_videos: Optional ground truth videos for comparison
             gif_fps: FPS for GIF output
         """
         self.generator.eval()
 
+        # Prepare labels for visualization
         if digits is None:
-            # Use empty strings if no digits specified
-            sample_prompts = [""] * num_samples
             digit_labels = None
         else:
-            # Convert digits to text strings for text encoder
-            sample_prompts = [str(d) for d in digits[:num_samples]]
             digit_labels = digits[:num_samples]
-            # Pad with empty strings if needed
-            while len(sample_prompts) < num_samples:
-                sample_prompts.append("")
-                if digit_labels is not None:
-                    digit_labels.append(None)
+            # Pad with None if needed
+            while len(digit_labels) < num_samples:
+                digit_labels.append(None)
 
         with torch.no_grad():
-            conditional_dict = text_encoder(sample_prompts)
+            # Use empty conditional dict (model will create dummy embeddings if needed)
+            conditional_dict = {}
 
-            batch_size = len(sample_prompts)
+            batch_size = num_samples
             noise = torch.randn(
                 batch_size, num_frames, 3, 64, 64,
                 device=self.device
@@ -449,7 +411,7 @@ class SimplifiedTrainer:
             if digit_labels:
                 labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
             else:
-                labels_for_viz = sample_prompts
+                labels_for_viz = [""] * num_samples
             save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
 
             comparison_grid_path = None
@@ -477,13 +439,14 @@ class SimplifiedTrainer:
                         "samples/comparison_grid": wandb.Image(str(comparison_grid_path)),
                     }, step=self.step)
 
-                for i, (video_tensor, prompt) in enumerate(zip(videos_list, sample_prompts)):
+                for i, video_tensor in enumerate(videos_list):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
+                    caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
                     wandb.log({
                         f"samples/generated_video_{i}": wandb.Video(
                             str(gif_path),
                             format="gif",
-                            caption=f"Generated: {prompt}"
+                            caption=caption
                         ),
                     }, step=self.step)
 
@@ -548,60 +511,6 @@ class SimpleScheduler:
             alpha = alpha.view(-1, 1, 1, 1, 1)
 
         return alpha * x + (1 - alpha) * noise
-
-
-class SimpleTextEncoder(nn.Module):
-    """Simple deterministic text encoder for tutorial."""
-
-    def __init__(self, device="cuda", text_dim=128, text_len=77, vocab_size=256):
-        super().__init__()
-        self.device = device
-        self.text_dim = text_dim
-        self.text_len = text_len
-        self.vocab_size = vocab_size
-
-        self.char_embedding = nn.Embedding(vocab_size, text_dim)
-        self.proj = nn.Sequential(
-            nn.Linear(text_dim, text_dim),
-            nn.GELU(),
-            nn.Linear(text_dim, text_dim)
-        )
-
-        self.to(device)
-
-    def _tokenize(self, text: str) -> list:
-        """Character-level tokenization."""
-        tokens = []
-        for char in text:
-            byte_val = ord(char)
-            token = min(byte_val, self.vocab_size - 1)
-            tokens.append(token)
-        return tokens
-
-    def forward(self, text_prompts):
-        """Encode text prompts deterministically."""
-        batch_size = len(text_prompts)
-        prompt_embeds_list = []
-
-        for prompt in text_prompts:
-            tokens = self._tokenize(prompt)
-
-            if len(tokens) < self.text_len:
-                tokens = tokens + [0] * (self.text_len - len(tokens))
-            else:
-                tokens = tokens[:self.text_len]
-
-            token_tensor = torch.tensor(tokens, device=self.device, dtype=torch.long)
-            embed_seq = self.char_embedding(token_tensor)
-            embed_seq = self.proj(embed_seq)
-
-            prompt_embeds_list.append(embed_seq)
-
-        prompt_embeds = torch.stack(prompt_embeds_list, dim=0)
-
-        return {
-            "prompt_embeds": prompt_embeds
-        }
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="train")
@@ -688,17 +597,9 @@ def main(cfg: DictConfig):
     print(f"   Model parameters: {sum(p.numel() for p in generator.parameters()):,}")
     print(f"   Using TinyCausalWanModel (transformer backbone)")
 
-    # Create text encoder
-    text_encoder = SimpleTextEncoder(
-        device=device,
-        text_dim=cfg.text_encoder.text_dim,
-        text_len=cfg.text_encoder.text_len,
-        vocab_size=cfg.text_encoder.vocab_size
-    )
-
     # Create optimizer
     optimizer = torch.optim.AdamW(
-        list(generator.parameters()) + list(text_encoder.parameters()),
+        generator.parameters(),
         lr=lr,
         weight_decay=weight_decay
     )
@@ -746,10 +647,6 @@ def main(cfg: DictConfig):
                 generator.load_state_dict(checkpoint["generator_state_dict"])
                 print(f"   Loaded generator weights from checkpoint")
 
-            if "text_encoder_state_dict" in checkpoint:
-                text_encoder.load_state_dict(checkpoint["text_encoder_state_dict"])
-                print(f"   Loaded text encoder weights from checkpoint")
-
             training_type = checkpoint.get("training_type", "unknown")
             pretrain_step = checkpoint.get("step", 0)
             print(f"   Checkpoint type: {training_type}, trained for {pretrain_step} steps")
@@ -773,24 +670,8 @@ def main(cfg: DictConfig):
             dataloader_iter = iter(dataloader)
             batch = next(dataloader_iter)
 
-        # Convert labels from MovingMNISTDataset to text prompts (e.g., 0 -> "digit 0")
-        labels = batch["label"]
-        if isinstance(labels, torch.Tensor):
-            labels = labels.tolist()
-        elif not isinstance(labels, list):
-            labels = [labels]
-        batch["prompts"] = [f"digit {label}" if isinstance(label, int) else f"digits {label[0]},{label[1]}" for label in labels]
-
-        # Encode prompts
-        with torch.no_grad():
-            conditional_dict = text_encoder(batch["prompts"])
-            # Create unconditional dict (null embeddings)
-            unconditional_dict = {
-                "prompt_embeds": torch.zeros_like(conditional_dict["prompt_embeds"])
-            }
-
-        # Training step
-        metrics = trainer.train_step(batch, conditional_dict, unconditional_dict)
+        # Training step (no text conditioning needed)
+        metrics = trainer.train_step(batch)
 
         # Log to plotter
         plotter.log_metric("loss", metrics["loss"], trainer.step)
@@ -828,7 +709,6 @@ def main(cfg: DictConfig):
                         ground_truth_videos = ground_truth_videos.unsqueeze(0)
 
             trainer.generate_sample_videos(
-                text_encoder=text_encoder,
                 num_samples=num_viz_samples,
                 num_frames=cfg.generation.viz_num_frames,
                 num_frames_per_block=num_frame_per_block,
@@ -870,7 +750,6 @@ def main(cfg: DictConfig):
         pass
 
     trainer.generate_sample_videos(
-        text_encoder=text_encoder,
         num_samples=4,
         num_frames=9,
         num_frames_per_block=3,
