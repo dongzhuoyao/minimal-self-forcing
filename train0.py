@@ -93,10 +93,16 @@ class PretrainingTrainer:
 
         # Training config
         self.num_frames_per_block = cfg.training.num_frames_per_block
-        self.min_timestep = cfg.training.get('min_timestep', 0)
-        self.max_timestep = cfg.training.get('max_timestep', 1000)
+        self.num_train_timestep = cfg.training.get('num_train_timestep', 1000)
+        self.min_timestep = cfg.training.get('min_timestep', None)
+        self.max_timestep = cfg.training.get('max_timestep', None)
+        # Use min_step/max_step if not explicitly set (matching official impl)
+        if self.min_timestep is None:
+            self.min_timestep = int(0.02 * self.num_train_timestep)  # Default: 20
+        if self.max_timestep is None:
+            self.max_timestep = int(0.98 * self.num_train_timestep)  # Default: 980
         self.gradient_clip_norm = cfg.training.gradient_clip_norm
-        self.prediction_type = cfg.training.get('prediction_type', 'sample')
+        self.prediction_type = cfg.training.get('prediction_type', 'flow')  # Default to flow matching
 
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -184,14 +190,46 @@ class PretrainingTrainer:
             timesteps_expanded.flatten(0, 1)
         ).unflatten(0, (batch_size, num_frames))
 
-        # Forward pass
-        pred, _ = self.generator(noisy_video, timesteps_expanded, conditional_dict)
+        # Forward pass - model returns flow_pred (flow matching)
+        flow_pred, _ = self.generator(noisy_video, timesteps_expanded, conditional_dict)
 
-        # Compute loss
-        if self.prediction_type == 'sample':
-            loss = F.mse_loss(pred, video)
-        else:
-            loss = F.mse_loss(pred, noise)
+        # Compute training target (Flow Matching: noise - sample)
+        training_target = self.scheduler.training_target(
+            video.flatten(0, 1),
+            noise.flatten(0, 1),
+            timesteps_expanded.flatten(0, 1)
+        ).unflatten(0, (batch_size, num_frames))
+
+        # Compute loss with timestep weighting (matching official impl)
+        if self.prediction_type == 'flow':
+            # Flow Matching loss
+            loss = F.mse_loss(
+                flow_pred.float(), 
+                training_target.float(), 
+                reduction='none'
+            )
+            # Per-frame loss: mean over spatial dimensions [B, F]
+            loss = loss.mean(dim=(2, 3, 4))
+            # Apply timestep weighting
+            weights = self.scheduler.training_weight(timesteps_expanded)
+            loss = loss * weights
+            loss = loss.mean()
+        elif self.prediction_type == 'sample':
+            # Convert flow_pred to x0_pred for sample prediction
+            x0_pred = self.scheduler.convert_flow_to_x0(
+                flow_pred.flatten(0, 1),
+                noisy_video.flatten(0, 1),
+                timesteps_expanded.flatten(0, 1)
+            ).unflatten(0, (batch_size, num_frames))
+            loss = F.mse_loss(x0_pred, video)
+        else:  # noise prediction
+            # Convert flow_pred to noise prediction
+            noise_pred = self.scheduler.convert_flow_to_noise(
+                flow_pred.flatten(0, 1),
+                noisy_video.flatten(0, 1),
+                timesteps_expanded.flatten(0, 1)
+            ).unflatten(0, (batch_size, num_frames))
+            loss = F.mse_loss(noise_pred, noise)
 
         # Backward pass
         loss.backward()
@@ -298,7 +336,7 @@ class PretrainingTrainer:
                 device=self.device
             )
 
-            # Simple iterative denoising
+            # Simple iterative denoising with Flow Matching
             denoising_steps = [1000, 750, 500, 250, 0]
             x = noise
 
@@ -310,16 +348,33 @@ class PretrainingTrainer:
                     dtype=torch.long
                 )
 
-                pred, _ = self.generator(x, timestep, conditional_dict)
+                flow_pred, _ = self.generator(x, timestep, conditional_dict)
+                
+                # Convert flow_pred to x0_pred for next step
+                x0_pred = self.scheduler.convert_flow_to_x0(
+                    flow_pred.flatten(0, 1),
+                    x.flatten(0, 1),
+                    timestep.flatten(0, 1)
+                ).unflatten(0, (batch_size, num_frames))
 
                 # Move towards prediction
                 if i < len(denoising_steps) - 2:
                     next_t = denoising_steps[i + 1]
-                    alpha = 1.0 - (next_t / 1000.0)
-                    noise_new = torch.randn_like(pred)
-                    x = alpha * pred + (1 - alpha) * noise_new
+                    # Add noise for next timestep
+                    noise_new = torch.randn_like(x0_pred)
+                    next_timestep = torch.full(
+                        (batch_size, num_frames),
+                        next_t,
+                        device=self.device,
+                        dtype=torch.long
+                    )
+                    x = self.scheduler.add_noise(
+                        x0_pred.flatten(0, 1),
+                        noise_new.flatten(0, 1),
+                        next_timestep.flatten(0, 1)
+                    ).unflatten(0, (batch_size, num_frames))
                 else:
-                    x = pred
+                    x = x0_pred
 
             generated_videos = x
 
@@ -360,22 +415,155 @@ class PretrainingTrainer:
 
 
 class SimpleScheduler:
-    """Simple noise scheduler for diffusion."""
+    """
+    Simple noise scheduler for diffusion with Flow Matching support.
+    
+    Matches official FlowMatchScheduler structure:
+    - Uses sigma-based noise schedule
+    - Supports training_target (flow = noise - sample)
+    - Supports training_weight (timestep-dependent weights)
+    - Supports flow <-> x0 conversions
+    """
 
-    def __init__(self):
-        self.timesteps = torch.linspace(1000, 0, 1000)
+    def __init__(self, num_train_timesteps=1000, sigma_max=1.0, sigma_min=0.003/1.002):
+        self.num_train_timesteps = num_train_timesteps
+        self.sigma_max = sigma_max
+        self.sigma_min = sigma_min
+        
+        # Create timesteps [0, 1000] -> [1000, 0] for compatibility
+        self.timesteps = torch.linspace(num_train_timesteps, 0, num_train_timesteps)
+        
+        # Create sigmas for Flow Matching: sigma(t) = t * (sigma_max - sigma_min) + sigma_min
+        # When t=0: sigma=sigma_min, when t=1: sigma=sigma_max
+        t_normalized = torch.linspace(0, 1, num_train_timesteps)
+        self.sigmas = t_normalized * (sigma_max - sigma_min) + sigma_min
+        
+        # Linear timestep weights (matching official impl)
+        # Higher weights for middle timesteps
+        self.linear_timesteps_weights = torch.ones(num_train_timesteps)
+        # Optional: can adjust weights here if needed
 
     def add_noise(self, x, noise, timestep):
-        """Add noise to clean data at given timestep."""
-        alpha = 1.0 - (timestep.float() / 1000.0)
-        alpha = alpha.clamp(0, 1)
-
+        """
+        Add noise to clean data at given timestep (Flow Matching).
+        
+        Args:
+            x: Clean data [B*F, C, H, W] or [B*F, ...]
+            noise: Noise tensor [B*F, C, H, W] or [B*F, ...]
+            timestep: Timestep tensor [B*F] (values in [0, 1000])
+            
+        Returns:
+            Noisy data: (1 - sigma) * x + sigma * noise
+        """
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+        
+        # Convert timestep to sigma
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
+        )
+        sigma = self.sigmas[timestep_id]
+        
+        # Reshape sigma for broadcasting
         if len(x.shape) == 4:
-            alpha = alpha.view(-1, 1, 1, 1)
+            sigma = sigma.view(-1, 1, 1, 1)
         elif len(x.shape) == 5:
-            alpha = alpha.view(-1, 1, 1, 1, 1)
-
-        return alpha * x + (1 - alpha) * noise
+            sigma = sigma.view(-1, 1, 1, 1, 1)
+        
+        # Flow Matching: (1 - sigma) * x + sigma * noise
+        return (1 - sigma) * x + sigma * noise
+    
+    def training_target(self, sample, noise, timestep):
+        """
+        Compute training target for Flow Matching.
+        
+        Args:
+            sample: Clean sample [B*F, C, H, W]
+            noise: Noise tensor [B*F, C, H, W]
+            timestep: Timestep tensor [B*F]
+            
+        Returns:
+            Flow target: noise - sample
+        """
+        return noise - sample
+    
+    def training_weight(self, timestep):
+        """
+        Get timestep-dependent training weights.
+        
+        Args:
+            timestep: Timestep tensor [B, F] or [B*F]
+            
+        Returns:
+            Weights tensor with same shape as timestep
+        """
+        if timestep.ndim == 2:
+            timestep_flat = timestep.flatten(0, 1)
+        else:
+            timestep_flat = timestep
+        
+        self.linear_timesteps_weights = self.linear_timesteps_weights.to(timestep.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(1) - timestep_flat.unsqueeze(0)).abs(), dim=0
+        )
+        weights = self.linear_timesteps_weights[timestep_id]
+        
+        if timestep.ndim == 2:
+            weights = weights.unflatten(0, timestep.shape)
+        
+        return weights
+    
+    def convert_flow_to_x0(self, flow_pred, xt, timestep):
+        """
+        Convert flow prediction to x0 prediction.
+        
+        Flow Matching: xt = (1 - sigma_t) * x0 + sigma_t * noise
+        Flow = noise - x0
+        Therefore: x0 = xt - sigma_t * flow
+        
+        Args:
+            flow_pred: Flow prediction [B*F, C, H, W]
+            xt: Noisy input [B*F, C, H, W]
+            timestep: Timestep tensor [B*F]
+            
+        Returns:
+            x0_pred: Predicted clean sample [B*F, C, H, W]
+        """
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+        
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
+        )
+        sigma_t = self.sigmas[timestep_id]
+        
+        if len(xt.shape) == 4:
+            sigma_t = sigma_t.view(-1, 1, 1, 1)
+        elif len(xt.shape) == 5:
+            sigma_t = sigma_t.view(-1, 1, 1, 1, 1)
+        
+        x0_pred = xt - sigma_t * flow_pred
+        return x0_pred
+    
+    def convert_flow_to_noise(self, flow_pred, xt, timestep):
+        """
+        Convert flow prediction to noise prediction.
+        
+        Flow = noise - x0
+        x0 = xt - sigma_t * flow
+        Therefore: noise = flow + x0 = flow + (xt - sigma_t * flow) = xt - (sigma_t - 1) * flow
+        
+        Args:
+            flow_pred: Flow prediction [B*F, C, H, W]
+            xt: Noisy input [B*F, C, H, W]
+            timestep: Timestep tensor [B*F]
+            
+        Returns:
+            noise_pred: Predicted noise [B*F, C, H, W]
+        """
+        x0_pred = self.convert_flow_to_x0(flow_pred, xt, timestep)
+        noise_pred = flow_pred + x0_pred
+        return noise_pred
 
 
 class SimpleTextEncoder(nn.Module):
@@ -532,8 +720,12 @@ def main(cfg: DictConfig):
         weight_decay=weight_decay
     )
 
-    # Create scheduler
-    scheduler = SimpleScheduler()
+    # Create scheduler with Flow Matching support
+    scheduler = SimpleScheduler(
+        num_train_timesteps=cfg.training.get('num_train_timestep', 1000),
+        sigma_max=cfg.training.get('sigma_max', 1.0),
+        sigma_min=cfg.training.get('sigma_min', 0.003/1.002)
+    )
 
     # Create trainer
     print("\n3. Creating trainer...")
