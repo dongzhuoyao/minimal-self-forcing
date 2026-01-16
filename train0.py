@@ -63,8 +63,7 @@ class PretrainingTrainer:
         optimizer: torch.optim.Optimizer,
         scheduler: object,
         cfg: DictConfig,
-        output_dir: Path,
-        text_encoder: Optional[nn.Module] = None
+        output_dir: Path
     ):
         """
         Args:
@@ -72,7 +71,7 @@ class PretrainingTrainer:
             optimizer: Optimizer for the generator
             scheduler: Noise scheduler
             cfg: Hydra config object
-            text_encoder: Optional text encoder to save in checkpoints
+            output_dir: Output directory for logs and checkpoints
         """
         self.device = cfg.device if torch.cuda.is_available() or cfg.device == "cpu" else "cpu"
         self.log_dir = output_dir
@@ -86,7 +85,6 @@ class PretrainingTrainer:
         self.generator = generator.to(self.device)
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.text_encoder = text_encoder
         self.cfg = cfg
 
         # Training config
@@ -139,8 +137,7 @@ class PretrainingTrainer:
 
     def train_step(
         self,
-        batch: Dict[str, torch.Tensor],
-        conditional_dict: Dict[str, torch.Tensor]
+        batch: Dict[str, torch.Tensor]
     ) -> Dict[str, float]:
         """Perform one pretraining step."""
         self.generator.train()
@@ -189,6 +186,8 @@ class PretrainingTrainer:
         ).unflatten(0, (batch_size, num_frames))
 
         # Forward pass - model returns flow_pred (flow matching)
+        # Use empty conditional dict (model will create dummy embeddings if needed)
+        conditional_dict = {}
         flow_pred, _ = self.generator(noisy_video, timesteps_expanded, conditional_dict)
 
         # Compute training target (Flow Matching: noise - sample)
@@ -271,10 +270,6 @@ class PretrainingTrainer:
             "training_type": "pretraining"
         }
 
-        # Save text encoder weights if available
-        if self.text_encoder is not None:
-            checkpoint["text_encoder_state_dict"] = self.text_encoder.state_dict()
-
         suffix = "final" if final else f"step_{self.step:06d}"
         checkpoint_path = self.log_dir / f"checkpoint_{suffix}.pt"
         torch.save(checkpoint, checkpoint_path)
@@ -302,7 +297,6 @@ class PretrainingTrainer:
 
     def generate_sample_videos(
         self,
-        text_encoder: nn.Module,
         num_samples: int = 4,
         num_frames: int = 9,
         digits: Optional[List[int]] = None,
@@ -312,33 +306,28 @@ class PretrainingTrainer:
         """Generate sample videos for visualization.
         
         Args:
-            text_encoder: Text encoder model
             num_samples: Number of videos to generate
             num_frames: Number of frames per video
-            digits: List of digit labels (0-9) to visualize. If None, uses empty strings.
+            digits: List of digit labels (0-9) to visualize. If None, uses empty labels.
             ground_truth_videos: Optional ground truth videos for comparison
             gif_fps: FPS for GIF output
         """
         self.generator.eval()
 
+        # Prepare labels for visualization
         if digits is None:
-            # Use empty strings if no digits specified
-            sample_prompts = [""] * num_samples
             digit_labels = None
         else:
-            # Convert digits to text strings for text encoder
-            sample_prompts = [str(d) for d in digits[:num_samples]]
             digit_labels = digits[:num_samples]
-            # Pad with empty strings if needed
-            while len(sample_prompts) < num_samples:
-                sample_prompts.append("")
-                if digit_labels is not None:
-                    digit_labels.append(None)
+            # Pad with None if needed
+            while len(digit_labels) < num_samples:
+                digit_labels.append(None)
 
         with torch.no_grad():
-            conditional_dict = text_encoder(sample_prompts)
+            # Use empty conditional dict (model will create dummy embeddings if needed)
+            conditional_dict = {}
 
-            batch_size = len(sample_prompts)
+            batch_size = num_samples
             height, width = 64, 64
 
             # Start from pure noise (normalized to match data range)
@@ -409,7 +398,7 @@ class PretrainingTrainer:
             if digit_labels:
                 labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
             else:
-                labels_for_viz = sample_prompts
+                labels_for_viz = [""] * num_samples
             save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
 
             print(f"  Saved sample videos to {self.samples_dir}")
@@ -662,60 +651,6 @@ class SimpleScheduler:
         return prev_sample
 
 
-class SimpleTextEncoder(nn.Module):
-    """Simple text encoder (same as train.py for compatibility)."""
-
-    def __init__(self, device="cuda", text_dim=128, text_len=77, vocab_size=256):
-        super().__init__()
-        self.device = device
-        self.text_dim = text_dim
-        self.text_len = text_len
-        self.vocab_size = vocab_size
-
-        self.char_embedding = nn.Embedding(vocab_size, text_dim)
-        self.proj = nn.Sequential(
-            nn.Linear(text_dim, text_dim),
-            nn.GELU(),
-            nn.Linear(text_dim, text_dim)
-        )
-
-        self.to(device)
-
-    def _tokenize(self, text: str) -> list:
-        """Character-level tokenization."""
-        tokens = []
-        for char in text:
-            byte_val = ord(char)
-            token = min(byte_val, self.vocab_size - 1)
-            tokens.append(token)
-        return tokens
-
-    def forward(self, text_prompts):
-        """Encode text prompts."""
-        batch_size = len(text_prompts)
-        prompt_embeds_list = []
-
-        for prompt in text_prompts:
-            tokens = self._tokenize(prompt)
-
-            if len(tokens) < self.text_len:
-                tokens = tokens + [0] * (self.text_len - len(tokens))
-            else:
-                tokens = tokens[:self.text_len]
-
-            token_tensor = torch.tensor(tokens, device=self.device, dtype=torch.long)
-            embed_seq = self.char_embedding(token_tensor)
-            embed_seq = self.proj(embed_seq)
-
-            prompt_embeds_list.append(embed_seq)
-
-        prompt_embeds = torch.stack(prompt_embeds_list, dim=0)
-
-        return {
-            "prompt_embeds": prompt_embeds
-        }
-
-
 @hydra.main(version_base=None, config_path="configs", config_name="train0")
 def main(cfg: DictConfig):
     """Main pretraining script."""
@@ -798,17 +733,9 @@ def main(cfg: DictConfig):
     )
     print(f"   Model parameters: {sum(p.numel() for p in generator.parameters()):,}")
 
-    # Create text encoder
-    text_encoder = SimpleTextEncoder(
-        device=device,
-        text_dim=cfg.text_encoder.text_dim,
-        text_len=cfg.text_encoder.text_len,
-        vocab_size=cfg.text_encoder.vocab_size
-    )
-
     # Create optimizer
     optimizer = torch.optim.AdamW(
-        list(generator.parameters()) + list(text_encoder.parameters()),
+        generator.parameters(),
         lr=lr,
         weight_decay=weight_decay
     )
@@ -827,8 +754,7 @@ def main(cfg: DictConfig):
         optimizer=optimizer,
         scheduler=scheduler,
         cfg=cfg,
-        output_dir=output_dir,
-        text_encoder=text_encoder
+        output_dir=output_dir
     )
 
     # Training plotter
@@ -848,20 +774,8 @@ def main(cfg: DictConfig):
             dataloader_iter = iter(dataloader)
             batch = next(dataloader_iter)
 
-        # Convert labels from MovingMNISTDataset to text prompts (e.g., 0 -> "digit 0")
-        labels = batch["label"]
-        if isinstance(labels, torch.Tensor):
-            labels = labels.tolist()
-        elif not isinstance(labels, list):
-            labels = [labels]
-        batch["prompts"] = [f"digit {label}" if isinstance(label, int) else f"digits {label[0]},{label[1]}" for label in labels]
-
-        # Encode prompts
-        with torch.no_grad():
-            conditional_dict = text_encoder(batch["prompts"])
-
-        # Training step
-        metrics = trainer.train_step(batch, conditional_dict)
+        # Training step (no text conditioning needed)
+        metrics = trainer.train_step(batch)
 
         # Log to plotter
         plotter.log_metric("loss", metrics["loss"], trainer.step)
@@ -885,7 +799,6 @@ def main(cfg: DictConfig):
             num_viz_samples = cfg.generation.num_viz_samples
             viz_digits = list(cfg.viz_digits) if cfg.viz_digits else list(range(min(10, num_viz_samples)))
             trainer.generate_sample_videos(
-                text_encoder=text_encoder,
                 num_samples=num_viz_samples,
                 num_frames=video_frames,
                 digits=viz_digits,
@@ -909,7 +822,6 @@ def main(cfg: DictConfig):
     # Generate final samples
     print("\nGenerating final sample videos...")
     trainer.generate_sample_videos(
-        text_encoder=text_encoder,
         num_samples=4,
         num_frames=video_frames,
         gif_fps=cfg.generation.gif_fps
