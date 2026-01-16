@@ -19,7 +19,7 @@ pip install git+https://github.com/openai/CLIP.git
 Train the Self-Forcing model:
 
 ```bash
-python trainer.py --num_steps 1000 --batch_size 16 --lr 1e-5
+python train.py --num_steps 1000 --batch_size 16 --lr 1e-5
 ```
 
 **Key Arguments:**
@@ -35,13 +35,13 @@ python trainer.py --num_steps 1000 --batch_size 16 --lr 1e-5
 **Examples:**
 ```bash
 # Basic training with defaults
-python trainer.py --num_steps 1000
+python train.py --num_steps 1000
 
 # Custom batch size and learning rate
-python trainer.py --num_steps 1000 --batch_size 32 --lr 2e-4
+python train.py --num_steps 1000 --batch_size 32 --lr 2e-4
 
 # Full example with all common arguments
-python trainer.py --num_steps 1000 --batch_size 16 --lr 1e-4 --num_samples 50
+python train.py --num_steps 1000 --batch_size 16 --lr 1e-4 --num_samples 50
 ```
 
 ## Sampling/Generation
@@ -86,7 +86,7 @@ For more detailed information, see the documentation in the `markdown/` folder:
 ```
 ├── visualization/     # Visualization tools
 ├── configs/           # Configuration files
-├── trainer.py         # Training script
+├── train.py           # Training script
 ├── generate.py        # Generation/sampling script
 ├── tiny_causal_wan.py # Model definition
 ├── metrics.py         # Evaluation metrics
