@@ -40,10 +40,7 @@ training:
   video_width: 64              # Video width
   video_frames: 9              # Number of frames per video in dataset
 
-# Paths
-paths:
-  log_dir: "logs/training"     # Directory for logs and checkpoints
-  output_dir: "outputs/generated"
+
 
 # Checkpoint to load (null for training from scratch)
 # For fine-tuning after pretraining:
