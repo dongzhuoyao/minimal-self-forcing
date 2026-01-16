@@ -727,7 +727,8 @@ def main():
     parser.add_argument("--wandb_project", type=str, default="self-forcing", help="W&B project name")
     parser.add_argument("--wandb_entity", type=str, default=None, help="W&B entity/team name (optional)")
     parser.add_argument("--wandb_name", type=str, default=None, help="W&B run name (optional)")
-    
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to pretrained checkpoint from train0.py")
+
     args = parser.parse_args()
     
     # Load config file
@@ -920,9 +921,33 @@ def main():
         wandb_name=getattr(args, 'wandb_name', None)
     )
     
+    # Load pretrained checkpoint if provided
+    if args.checkpoint is not None:
+        checkpoint_path = Path(args.checkpoint)
+        if checkpoint_path.exists():
+            print(f"\n   Loading pretrained checkpoint: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+
+            # Load generator weights
+            if "generator_state_dict" in checkpoint:
+                generator.load_state_dict(checkpoint["generator_state_dict"])
+                print(f"   Loaded generator weights from checkpoint")
+
+            # Optionally load text encoder weights if present
+            if "text_encoder_state_dict" in checkpoint:
+                text_encoder.load_state_dict(checkpoint["text_encoder_state_dict"])
+                print(f"   Loaded text encoder weights from checkpoint")
+
+            # Check if this was a pretraining checkpoint
+            training_type = checkpoint.get("training_type", "unknown")
+            pretrain_step = checkpoint.get("step", 0)
+            print(f"   Checkpoint type: {training_type}, trained for {pretrain_step} steps")
+        else:
+            print(f"   Warning: Checkpoint {checkpoint_path} not found, starting from scratch")
+
     # Training plotter
     plotter = TrainingPlotter(save_dir=str(Path(args.log_dir) / "plots"))
-    
+
     # Training loop with plotting
     print("\n4. Starting training...")
     print("-" * 70)
