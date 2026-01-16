@@ -397,16 +397,24 @@ class MovingMNISTGenerator:
             transform=transforms.ToTensor()
         )
         print(f"✓ Loaded MNIST dataset with {len(self.mnist_dataset)} digits")
+        
+        # Precompute label-to-indices mapping for fast lookup
+        print("Building label index mapping...")
+        self.label_to_indices = {}
+        for i, (_, label) in enumerate(self.mnist_dataset):
+            if label.item() not in self.label_to_indices:
+                self.label_to_indices[label.item()] = []
+            self.label_to_indices[label.item()].append(i)
+        print(f"✓ Indexed {len(self.label_to_indices)} digit classes")
     
     def _get_digit_image(self, digit_label: int) -> np.ndarray:
         """Get a random MNIST digit image for the given label."""
-        # Find all images with this label
-        indices = [i for i, (_, label) in enumerate(self.mnist_dataset) if label == digit_label]
-        if not indices:
+        # Use precomputed label-to-indices mapping for fast lookup
+        if digit_label in self.label_to_indices and len(self.label_to_indices[digit_label]) > 0:
+            idx = np.random.choice(self.label_to_indices[digit_label])
+        else:
             # Fallback: use any digit
             idx = np.random.randint(len(self.mnist_dataset))
-        else:
-            idx = np.random.choice(indices)
         
         # Get digit image (already normalized to [0, 1])
         digit_tensor, _ = self.mnist_dataset[idx]
@@ -438,8 +446,10 @@ class MovingMNISTGenerator:
         """
         video = np.zeros((self.num_frames, self.height, self.width, 3), dtype=np.uint8)
         
-        # Get digit image
+        # Get digit image and resize once (reuse for all frames)
         digit_img = self._get_digit_image(digit_label)
+        digit_pil = Image.fromarray(digit_img, mode='L')
+        digit_pil = digit_pil.resize((self.digit_size, self.digit_size), Image.Resampling.LANCZOS)
         
         # Initialize position and velocity
         if start_x is None:
@@ -477,11 +487,7 @@ class MovingMNISTGenerator:
             # Create frame
             img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
             
-            # Resize digit to desired size
-            digit_pil = Image.fromarray(digit_img, mode='L')
-            digit_pil = digit_pil.resize((self.digit_size, self.digit_size), Image.Resampling.LANCZOS)
-            
-            # Paste digit at current position
+            # Paste digit at current position (digit already resized)
             x_pos = int(x - self.digit_size // 2)
             y_pos = int(y - self.digit_size // 2)
             img.paste(digit_pil, (x_pos, y_pos))
@@ -509,9 +515,15 @@ class MovingMNISTGenerator:
         """
         video = np.zeros((self.num_frames, self.height, self.width, 3), dtype=np.uint8)
         
-        # Get digit images
+        # Get digit images and resize once (reuse for all frames)
         digit1_img = self._get_digit_image(digit1_label)
         digit2_img = self._get_digit_image(digit2_label)
+        digit1_pil = Image.fromarray(digit1_img, mode='L').resize(
+            (self.digit_size, self.digit_size), Image.Resampling.LANCZOS
+        )
+        digit2_pil = Image.fromarray(digit2_img, mode='L').resize(
+            (self.digit_size, self.digit_size), Image.Resampling.LANCZOS
+        )
         
         # Initialize positions and velocities for both digits
         x1 = np.random.uniform(self.digit_size // 2, self.width - self.digit_size // 2)
@@ -559,14 +571,7 @@ class MovingMNISTGenerator:
             # Create frame
             img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
             
-            # Resize and paste digits
-            digit1_pil = Image.fromarray(digit1_img, mode='L').resize(
-                (self.digit_size, self.digit_size), Image.Resampling.LANCZOS
-            )
-            digit2_pil = Image.fromarray(digit2_img, mode='L').resize(
-                (self.digit_size, self.digit_size), Image.Resampling.LANCZOS
-            )
-            
+            # Paste digits at current positions (digits already resized)
             x1_pos = int(x1 - self.digit_size // 2)
             y1_pos = int(y1 - self.digit_size // 2)
             x2_pos = int(x2 - self.digit_size // 2)
