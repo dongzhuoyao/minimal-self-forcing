@@ -24,7 +24,7 @@ text_encoder:
 dataset:
   type: "moving_mnist"         # Dataset type: "toy" or "moving_mnist"
   num_digits: 1                # Number of digits per video (Moving MNIST)
-  digit_size: 64               # Size of MNIST digit
+  digit_size: 28               # Size of MNIST digit (default: 28, original MNIST size)
   max_velocity: 2.0            # Maximum velocity for digit movement
 
 # Generation/Inference Hyperparameters

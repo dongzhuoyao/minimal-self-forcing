@@ -311,7 +311,7 @@ class MovingMNISTGenerator:
         height: int = 64,
         num_frames: int = 16,
         fps: int = 8,
-        digit_size: int = 64,
+        digit_size: int = 28,
         num_digits: int = 1,
         max_velocity: float = 2.0
     ):
@@ -321,7 +321,7 @@ class MovingMNISTGenerator:
             height: Video height in pixels
             num_frames: Number of frames per video
             fps: Frames per second
-            digit_size: Size of MNIST digit (default 64x64)
+            digit_size: Size of MNIST digit (default 28, original MNIST size)
             num_digits: Number of digits per video (1 or 2)
             max_velocity: Maximum velocity for digit movement
         """
@@ -855,8 +855,8 @@ if __name__ == "__main__":
                        help="Random seed")
     parser.add_argument("--num_digits", type=int, default=1, choices=[1, 2],
                        help="Number of digits per video (1 or 2)")
-    parser.add_argument("--digit_size", type=int, default=64,
-                       help="Size of MNIST digit")
+    parser.add_argument("--digit_size", type=int, default=28,
+                       help="Size of MNIST digit (default: 28, original MNIST size)")
     parser.add_argument("--max_velocity", type=float, default=2.0,
                        help="Maximum velocity for digit movement")
     parser.add_argument("--visualize", action="store_true",
