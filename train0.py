@@ -770,8 +770,19 @@ def main(cfg: DictConfig):
             dataloader_iter = iter(dataloader)
             batch = next(dataloader_iter)
 
-        # Rename 'prompt' to 'prompts' for consistency
-        batch["prompts"] = batch["prompt"]
+        # Handle both "prompt" (ToyDataset) and "label" (MovingMNISTDataset)
+        if "prompt" in batch:
+            batch["prompts"] = batch["prompt"]
+        elif "label" in batch:
+            # Convert labels to text prompts (e.g., 0 -> "digit 0")
+            labels = batch["label"]
+            if isinstance(labels, torch.Tensor):
+                labels = labels.tolist()
+            elif not isinstance(labels, list):
+                labels = [labels]
+            batch["prompts"] = [f"digit {label}" if isinstance(label, int) else f"digits {label[0]},{label[1]}" for label in labels]
+        else:
+            raise ValueError("Batch must contain either 'prompt' or 'label'")
 
         # Encode prompts
         with torch.no_grad():

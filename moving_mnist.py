@@ -16,17 +16,187 @@ import os
 import shutil
 from pathlib import Path
 
-# Import visualization functions (optional, will fail gracefully if not available)
+# Visualization imports (optional, will fail gracefully if not available)
 try:
-    from visualization import (
-        save_video_grid,
-        create_video_gif,
-        display_video,
-        save_video_frames
-    )
+    import matplotlib.pyplot as plt
+    import matplotlib.animation as animation
+    import imageio
     VISUALIZATION_AVAILABLE = True
 except ImportError:
     VISUALIZATION_AVAILABLE = False
+    plt = None
+    animation = None
+    imageio = None
+
+
+# Visualization functions
+def create_video_gif(video, output_path, fps=8, loop=0):
+    """Create a GIF from a video tensor."""
+    if not VISUALIZATION_AVAILABLE:
+        raise ImportError("Visualization packages (matplotlib, imageio) not available")
+    
+    if isinstance(video, torch.Tensor):
+        video_np = video.detach().cpu().numpy()
+    else:
+        video_np = np.array(video)
+    
+    if len(video_np.shape) == 5:
+        if video_np.shape[2] == 3 or video_np.shape[2] == 1:
+            video_np = video_np[0]
+            video_np = np.transpose(video_np, (0, 2, 3, 1))
+        else:
+            video_np = video_np[0]
+    elif len(video_np.shape) == 4:
+        if video_np.shape[1] == 3 or video_np.shape[1] == 1:
+            video_np = np.transpose(video_np, (0, 2, 3, 1))
+    
+    if video_np.max() <= 1.0:
+        video_np = (video_np * 255).astype(np.uint8)
+    else:
+        video_np = np.clip(video_np, 0, 255).astype(np.uint8)
+    
+    if video_np.shape[-1] == 1:
+        video_np = np.repeat(video_np, 3, axis=-1)
+    
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    imageio.mimsave(output_path, video_np, fps=fps, loop=loop)
+
+
+def save_video_grid(videos, output_path, prompts=None, ncols=3, figsize=None):
+    """Save a grid of video frames as a single image."""
+    if not VISUALIZATION_AVAILABLE:
+        raise ImportError("Visualization packages (matplotlib, imageio) not available")
+    
+    num_videos = len(videos)
+    nrows = (num_videos + ncols - 1) // ncols
+    
+    if figsize is None:
+        figsize = (ncols * 2, nrows * 2)
+    
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    if num_videos == 1:
+        axes = [axes]
+    elif nrows == 1:
+        axes = axes if isinstance(axes, np.ndarray) else [axes]
+    else:
+        axes = axes.flatten()
+    
+    for idx, video in enumerate(videos):
+        if idx >= len(axes):
+            break
+        
+        ax = axes[idx]
+        if isinstance(video, torch.Tensor):
+            video_np = video.detach().cpu().numpy()
+        else:
+            video_np = np.array(video)
+        
+        if len(video_np.shape) == 5:
+            frame = video_np[0, 0]
+            if frame.shape[0] == 3 or frame.shape[0] == 1:
+                frame = np.transpose(frame, (1, 2, 0))
+        elif len(video_np.shape) == 4:
+            if video_np.shape[1] == 3 or video_np.shape[1] == 1:
+                frame = np.transpose(video_np[0], (1, 2, 0))
+            else:
+                frame = video_np[0]
+        else:
+            frame = video_np
+        
+        if frame.max() > 1.0:
+            frame = frame / 255.0
+        frame = np.clip(frame, 0, 1)
+        
+        if len(frame.shape) == 2 or (len(frame.shape) == 3 and frame.shape[2] == 1):
+            ax.imshow(frame.squeeze(), cmap='gray')
+        else:
+            ax.imshow(frame)
+        
+        ax.axis('off')
+        if prompts and idx < len(prompts):
+            title = prompts[idx]
+            if len(title) > 40:
+                title = title[:37] + "..."
+            ax.set_title(title, fontsize=8)
+    
+    for idx in range(num_videos, len(axes)):
+        axes[idx].axis('off')
+    
+    plt.tight_layout()
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=100, bbox_inches='tight')
+    plt.close()
+
+
+def save_video_frames(video, output_dir, prefix="frame"):
+    """Save individual frames from a video."""
+    if not VISUALIZATION_AVAILABLE:
+        raise ImportError("Visualization packages (matplotlib, imageio) not available")
+    
+    if isinstance(video, torch.Tensor):
+        video_np = video.detach().cpu().numpy()
+    else:
+        video_np = np.array(video)
+    
+    if len(video_np.shape) == 5:
+        video_np = video_np[0]
+        video_np = np.transpose(video_np, (0, 2, 3, 1))
+    elif len(video_np.shape) == 4:
+        if video_np.shape[1] == 3 or video_np.shape[1] == 1:
+            video_np = np.transpose(video_np, (0, 2, 3, 1))
+    
+    if video_np.max() <= 1.0:
+        video_np = (video_np * 255).astype(np.uint8)
+    else:
+        video_np = np.clip(video_np, 0, 255).astype(np.uint8)
+    
+    if video_np.shape[-1] == 1:
+        video_np = np.repeat(video_np, 3, axis=-1)
+    
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    for i, frame in enumerate(video_np):
+        frame_path = output_path / f"{prefix}_{i:03d}.png"
+        imageio.imwrite(str(frame_path), frame)
+
+
+def display_video(video, title="Video", fps=8):
+    """Display a video interactively (for Jupyter notebooks or interactive environments)."""
+    if not VISUALIZATION_AVAILABLE:
+        raise ImportError("Visualization packages (matplotlib, imageio) not available")
+    
+    if isinstance(video, torch.Tensor):
+        video_np = video.detach().cpu().numpy()
+    else:
+        video_np = np.array(video)
+    
+    if len(video_np.shape) == 5:
+        video_np = video_np[0]
+        video_np = np.transpose(video_np, (0, 2, 3, 1))
+    elif len(video_np.shape) == 4:
+        if video_np.shape[1] == 3 or video_np.shape[1] == 1:
+            video_np = np.transpose(video_np, (0, 2, 3, 1))
+    
+    if video_np.max() > 1.0:
+        video_np = video_np / 255.0
+    video_np = np.clip(video_np, 0, 1)
+    
+    if video_np.shape[-1] == 1:
+        video_np = np.repeat(video_np, 3, axis=-1)
+    
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_title(title)
+    ax.axis('off')
+    im = ax.imshow(video_np[0])
+    
+    def animate(frame_idx):
+        im.set_array(video_np[frame_idx])
+        return [im]
+    
+    anim = animation.FuncAnimation(fig, animate, frames=len(video_np), interval=1000/fps, blit=True, repeat=True)
+    plt.show()
+    return anim
 
 
 class MovingMNISTGenerator:
@@ -148,7 +318,7 @@ class MovingMNISTGenerator:
         start_y: Optional[float] = None,
         velocity_x: Optional[float] = None,
         velocity_y: Optional[float] = None
-    ) -> Tuple[np.ndarray, str]:
+    ) -> Tuple[np.ndarray, int]:
         """
         Generate a video of a single MNIST digit moving and bouncing around.
         
@@ -161,7 +331,7 @@ class MovingMNISTGenerator:
         
         Returns:
             video: numpy array of shape (num_frames, height, width, 3)
-            prompt: text description of the video
+            label: digit label (0-9)
         """
         video = np.zeros((self.num_frames, self.height, self.width, 3), dtype=np.uint8)
         
@@ -216,17 +386,13 @@ class MovingMNISTGenerator:
             # Convert to RGB (grayscale to 3-channel)
             video[frame_idx] = np.array(img.convert('RGB'))
         
-        # Generate prompt
-        direction = self._get_direction_description(vx, vy)
-        prompt = f"A digit {digit_label} moving {direction}"
-        
-        return video, prompt
+        return video, digit_label
     
     def generate_two_digits(
         self,
         digit1_label: int,
         digit2_label: int
-    ) -> Tuple[np.ndarray, str]:
+    ) -> Tuple[np.ndarray, Tuple[int, int]]:
         """
         Generate a video with two MNIST digits moving independently.
         
@@ -236,7 +402,7 @@ class MovingMNISTGenerator:
         
         Returns:
             video: numpy array of shape (num_frames, height, width, 3)
-            prompt: text description of the video
+            labels: tuple of (digit1_label, digit2_label)
         """
         video = np.zeros((self.num_frames, self.height, self.width, 3), dtype=np.uint8)
         
@@ -308,29 +474,7 @@ class MovingMNISTGenerator:
             
             video[frame_idx] = np.array(img.convert('RGB'))
         
-        # Generate prompt
-        prompt = f"Digits {digit1_label} and {digit2_label} moving around"
-        
-        return video, prompt
-    
-    def _get_direction_description(self, vx: float, vy: float) -> str:
-        """Convert velocity vector to direction description."""
-        # Normalize velocities for direction detection
-        abs_vx = abs(vx)
-        abs_vy = abs(vy)
-        
-        if abs_vx > abs_vy * 1.5:
-            return "horizontally"
-        elif abs_vy > abs_vx * 1.5:
-            return "vertically"
-        elif vx > 0 and vy > 0:
-            return "diagonally down-right"
-        elif vx > 0 and vy < 0:
-            return "diagonally up-right"
-        elif vx < 0 and vy > 0:
-            return "diagonally down-left"
-        else:
-            return "diagonally up-left"
+        return video, (digit1_label, digit2_label)
 
 
 class MovingMNISTDataset:
@@ -368,7 +512,7 @@ class MovingMNISTDataset:
             max_velocity=max_velocity
         )
         self.videos = []
-        self.prompts = []
+        self.labels = []
         
         np.random.seed(seed)
         self._generate_dataset()
@@ -379,17 +523,18 @@ class MovingMNISTDataset:
         
         for i in range(self.num_samples):
             if self.generator.num_digits == 1:
-                # Single digit
-                digit_label = np.random.randint(0, 10)
-                video, prompt = self.generator.generate_moving_digit(digit_label)
+                # Single digit - generate videos for digits 0-9 consecutively
+                digit_label = i % 10
+                video, label = self.generator.generate_moving_digit(digit_label)
             else:
                 # Two digits
                 digit1_label = np.random.randint(0, 10)
                 digit2_label = np.random.randint(0, 10)
-                video, prompt = self.generator.generate_two_digits(digit1_label, digit2_label)
+                video, labels = self.generator.generate_two_digits(digit1_label, digit2_label)
+                label = labels  # Store tuple for two digits
             
             self.videos.append(video)
-            self.prompts.append(prompt)
+            self.labels.append(label)
         
         print(f"Generated {len(self.videos)} videos")
     
@@ -399,7 +544,7 @@ class MovingMNISTDataset:
     def __getitem__(self, idx):
         """Get a video sample."""
         video = self.videos[idx]
-        prompt = self.prompts[idx]
+        label = self.labels[idx]
         
         # Convert to torch tensor and normalize to [-1, 1]
         video_tensor = torch.from_numpy(video).float()
@@ -408,17 +553,20 @@ class MovingMNISTDataset:
         
         return {
             "video": video_tensor,
-            "prompt": prompt,
+            "label": label,
             "idx": idx
         }
     
-    def save_prompts(self, output_path: str):
-        """Save prompts to a text file."""
+    def save_labels(self, output_path: str):
+        """Save labels to a text file."""
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, 'w') as f:
-            for prompt in self.prompts:
-                f.write(prompt + '\n')
-        print(f"Saved prompts to {output_path}")
+            for label in self.labels:
+                if isinstance(label, tuple):
+                    f.write(f"{label[0]},{label[1]}\n")
+                else:
+                    f.write(f"{label}\n")
+        print(f"Saved labels to {output_path}")
     
     def save_metadata(self, output_path: str):
         """Save dataset metadata to JSON."""
@@ -430,7 +578,7 @@ class MovingMNISTDataset:
             "fps": self.generator.fps,
             "num_digits": self.generator.num_digits,
             "digit_size": self.generator.digit_size,
-            "prompts": self.prompts
+            "labels": [list(label) if isinstance(label, tuple) else label for label in self.labels]
         }
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, 'w') as f:
@@ -458,7 +606,7 @@ class MovingMNISTDataset:
             display: Whether to display videos interactively
         
         Returns:
-            Tuple of (videos_list, prompts_list)
+            Tuple of (videos_list, labels_list)
         """
         if not VISUALIZATION_AVAILABLE:
             print("Warning: Visualization functions not available. Install required packages.")
@@ -474,9 +622,9 @@ class MovingMNISTDataset:
         
         print(f"\nVisualizing {num_samples} videos from dataset...")
         
-        # Collect videos and prompts
+        # Collect videos and labels
         videos = []
-        prompts = []
+        labels = []
         
         for i in range(num_samples):
             sample = self[i]
@@ -488,23 +636,29 @@ class MovingMNISTDataset:
             video_normalized = video_normalized.clamp(0, 1)
             
             videos.append(video_normalized)
-            prompts.append(sample["prompt"])
-            print(f"  Sample {i}: {sample['prompt']}")
+            label = sample["label"]
+            labels.append(label)
+            label_str = f"Digit {label}" if isinstance(label, int) else f"Digits {label[0]},{label[1]}"
+            print(f"  Sample {i}: {label_str}")
+        
+        # Create label strings for visualization
+        label_strings = [f"Digit {l}" if isinstance(l, int) else f"Digits {l[0]},{l[1]}" for l in labels]
         
         # Save video grid
         if save_grid:
             print(f"\n1. Saving video grid...")
             grid_path = f"{output_dir}/video_grid.png"
-            save_video_grid(videos, grid_path, prompts=prompts, ncols=3)
+            save_video_grid(videos, grid_path, prompts=label_strings, ncols=3)
             print(f"   Saved: {grid_path}")
         
         # Create GIFs for each video
         if save_gifs:
             print(f"\n2. Creating GIFs...")
-            for i, (video, prompt) in enumerate(zip(videos, prompts)):
+            for i, (video, label) in enumerate(zip(videos, labels)):
                 gif_path = f"{output_dir}/video_{i:03d}.gif"
                 create_video_gif(video, gif_path, fps=2)
-                print(f"   Saved GIF: {gif_path} ({prompt[:50]}...)")
+                label_str = f"Digit {label}" if isinstance(label, int) else f"Digits {label[0]},{label[1]}"
+                print(f"   Saved GIF: {gif_path} ({label_str})")
         
         # Save individual frames for first video
         if save_frames and len(videos) > 0:
@@ -516,15 +670,16 @@ class MovingMNISTDataset:
         # Display first video (if in interactive environment)
         if display and len(videos) > 0:
             print(f"\n4. Displaying first video...")
-            print(f"   Prompt: {prompts[0]}")
+            label_str = f"Digit {labels[0]}" if isinstance(labels[0], int) else f"Digits {labels[0][0]},{labels[0][1]}"
+            print(f"   Label: {label_str}")
             try:
-                display_video(videos[0], title=prompts[0])
+                display_video(videos[0], title=label_str)
             except Exception as e:
                 print(f"   Note: Interactive display not available ({e})")
                 print(f"   Check the saved GIFs and frames instead!")
         
         print(f"\n✓ All visualizations saved to: {output_dir}")
-        return videos, prompts
+        return videos, labels
     
     def visualize_single(
         self,
@@ -541,7 +696,7 @@ class MovingMNISTDataset:
             display: Whether to display video interactively
         
         Returns:
-            Tuple of (video_tensor, prompt)
+            Tuple of (video_tensor, label)
         """
         if not VISUALIZATION_AVAILABLE:
             print("Warning: Visualization functions not available. Install required packages.")
@@ -554,14 +709,15 @@ class MovingMNISTDataset:
         # Get sample
         sample = self[idx]
         video = sample["video"].unsqueeze(0)  # Add batch dimension
-        prompt = sample["prompt"]
+        label = sample["label"]
         
         # Convert from [-1, 1] to [0, 1] for visualization
         video_normalized = (video + 1.0) / 2.0
         video_normalized = video_normalized.clamp(0, 1)
         
         print(f"\nVisualizing video {idx}:")
-        print(f"  Prompt: {prompt}")
+        label_str = f"Digit {label}" if isinstance(label, int) else f"Digits {label[0]},{label[1]}"
+        print(f"  Label: {label_str}")
         print(f"  Shape: {video_normalized.shape}")
         
         # Create GIF if output path provided
@@ -573,11 +729,11 @@ class MovingMNISTDataset:
         # Display
         if display:
             try:
-                display_video(video_normalized, title=prompt)
+                display_video(video_normalized, title=label_str)
             except Exception as e:
                 print(f"  Note: Interactive display not available ({e})")
         
-        return video_normalized, prompt
+        return video_normalized, label
 
 
 if __name__ == "__main__":
@@ -609,8 +765,8 @@ if __name__ == "__main__":
                        help="Output directory for visualizations")
     parser.add_argument("--single", type=int, default=None,
                        help="Visualize a single video by index")
-    parser.add_argument("--save_prompts", type=str, default=None,
-                       help="Path to save prompts file")
+    parser.add_argument("--save_labels", type=str, default=None,
+                       help="Path to save labels file")
     parser.add_argument("--save_metadata", type=str, default=None,
                        help="Path to save metadata JSON file")
     
@@ -633,13 +789,14 @@ if __name__ == "__main__":
     
     print(f"\nGenerated {len(dataset)} videos")
     sample = dataset[0]
-    print(f"Sample 0 prompt: {sample['prompt']}")
+    label_str = f"Digit {sample['label']}" if isinstance(sample['label'], int) else f"Digits {sample['label'][0]},{sample['label'][1]}"
+    print(f"Sample 0 label: {label_str}")
     print(f"Video shape: {sample['video'].shape}")
     print(f"Video value range: [{sample['video'].min():.2f}, {sample['video'].max():.2f}]")
     
-    # Save prompts if requested
-    if args.save_prompts:
-        dataset.save_prompts(args.save_prompts)
+    # Save labels if requested
+    if args.save_labels:
+        dataset.save_labels(args.save_labels)
     
     # Save metadata if requested
     if args.save_metadata:
