@@ -2,7 +2,7 @@
 Generate videos using a trained checkpoint.
 
 Usage:
-    python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
+    python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "Your prompt here"
 """
 
 import torch
@@ -347,7 +347,7 @@ def main():
     model_cfg = config.setdefault('model', {})
     
     checkpoint = args.checkpoint or paths_cfg.get('checkpoint', 'logs/training/checkpoint_final.pt')
-    prompts = args.prompts or ["A red circle moving horizontally"]
+    prompts = args.prompts or [""]
     num_frames = args.num_frames or gen_cfg.get('num_frames', 9)
     output_dir = args.output_dir or gen_cfg.get('output_dir', 'outputs/generated')
     device = args.device or config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')

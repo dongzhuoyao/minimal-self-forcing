@@ -95,7 +95,7 @@ from visualization import create_video_gif, save_video_grid
 
 ### Run Generation
 ```bash
-python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
+python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "Your prompt here"
 ```
 
 ## Educational Value

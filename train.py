@@ -344,12 +344,7 @@ class SimplifiedTrainer:
         self.generator.eval()
 
         if prompts is None:
-            sample_prompts = [
-                "A red circle moving horizontally",
-                "A blue square rotating",
-                "A green triangle moving diagonally",
-                "A color gradient transitioning from red to blue"
-            ][:num_samples]
+            sample_prompts = [""] * num_samples
         else:
             sample_prompts = prompts[:num_samples]
 
@@ -776,10 +771,7 @@ def main(cfg: DictConfig):
         # Generate sample videos
         if trainer.step % viz_interval == 0 and trainer.step > 0:
             print(f"\nGenerating sample videos at step {trainer.step}...")
-            viz_prompts = list(cfg.viz_prompts) if cfg.viz_prompts else [
-                "A red circle moving horizontally",
-                "A blue square moving vertically"
-            ]
+            viz_prompts = list(cfg.viz_prompts) if cfg.viz_prompts else [""] * cfg.generation.num_viz_samples
 
             ground_truth_videos = None
             if "video" in batch:

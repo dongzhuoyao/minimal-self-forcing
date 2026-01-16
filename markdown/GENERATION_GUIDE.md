@@ -11,7 +11,7 @@ Generate a video with a single prompt:
 ```bash
 conda activate sf
 python generate.py --checkpoint logs/training/checkpoint_final.pt \
-    --prompts "A red circle moving horizontally"
+    --prompts "Your prompt here"
 ```
 
 ### Generate Multiple Videos
@@ -21,9 +21,9 @@ Generate multiple videos with different prompts:
 ```bash
 python generate.py \
     --checkpoint logs/training/checkpoint_final.pt \
-    --prompts "A red circle moving horizontally" \
-              "A blue square rotating clockwise" \
-              "A green triangle bouncing"
+    --prompts "Your prompt 1" \
+              "Your prompt 2" \
+              "Your prompt 3"
 ```
 
 ### Customize Generation
@@ -40,7 +40,7 @@ python generate.py \
 ## Command Line Arguments
 
 - `--checkpoint`: Path to checkpoint file (default: `logs/training/checkpoint_final.pt`)
-- `--prompts`: One or more text prompts (default: `["A red circle moving horizontally"]`)
+- `--prompts`: One or more text prompts (default: `[""]`)
 - `--num_frames`: Number of frames to generate, must be divisible by `num_frames_per_block` (default: `9`)
 - `--output_dir`: Directory to save generated videos (default: `outputs/generated`)
 - `--device`: Device to use - `cuda` or `cpu` (default: `cuda` if available)
@@ -55,7 +55,7 @@ python generate.py \
 # Use the final checkpoint from training
 python generate.py \
     --checkpoint logs/training/checkpoint_final.pt \
-    --prompts "A red circle moving horizontally"
+    --prompts "Your prompt here"
 ```
 
 ### Example 2: Generate with Specific Step Checkpoint
@@ -64,7 +64,7 @@ python generate.py \
 # Use a checkpoint from a specific training step
 python generate.py \
     --checkpoint tutorial/logs/training/checkpoint_step_000050.pt \
-    --prompts "A blue square rotating" \
+    --prompts "Your prompt here" \
     --num_frames 9
 ```
 
@@ -74,7 +74,7 @@ python generate.py \
 # Generate 21 frames (7 blocks × 3 frames per block)
 python generate.py \
     --checkpoint logs/training/checkpoint_final.pt \
-    --prompts "A green triangle moving diagonally" \
+    --prompts "Your prompt here" \
     --num_frames 21
 ```
 
@@ -163,5 +163,5 @@ python trainer.py --num_steps 1000
 # Generate videos with the trained model
 python generate.py \
     --checkpoint logs/training/checkpoint_final.pt \
-    --prompts "A red circle moving horizontally"
+    --prompts "Your prompt here"
 ```

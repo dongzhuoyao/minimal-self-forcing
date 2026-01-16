@@ -49,7 +49,7 @@ python train.py --num_steps 1000 --batch_size 16 --lr 1e-4 --num_samples 50
 Generate videos using a trained checkpoint:
 
 ```bash
-python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A red circle moving horizontally"
+python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "Your prompt here"
 ```
 
 **Key Arguments:**
@@ -64,7 +64,7 @@ python generate.py --checkpoint logs/training/checkpoint_final.pt --prompts "A r
 ```bash
 python generate.py \
     --checkpoint logs/training/checkpoint_final.pt \
-    --prompts "A red circle moving horizontally" "A blue square rotating" \
+    --prompts "Your prompt 1" "Your prompt 2" \
     --num_frames 12 \
     --output_dir outputs/my_generations
 ```

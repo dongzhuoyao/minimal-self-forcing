@@ -176,7 +176,7 @@ score = consistency_metric.compute(video)
 
 # CLIP score (requires CLIP: pip install git+https://github.com/openai/CLIP.git)
 clip_metric = CLIPScoreMetric()
-clip_score = clip_metric.compute(video, "A red circle moving horizontally")
+clip_score = clip_metric.compute(video, "Your prompt here")
 
 # Visual quality (requires ground truth)
 quality_metric = VisualQualityMetric()
@@ -285,7 +285,7 @@ pipeline = SimplifiedSelfForcingPipeline(
 )
 
 # Generate video
-prompt = "A red circle moving horizontally"
+prompt = "Your prompt here"
 conditional_dict = text_encoder([prompt])
 
 # Initialize noise
@@ -316,9 +316,9 @@ The `SimplifiedSelfForcingPipeline` accepts:
 ```python
 # Generate multiple videos
 prompts = [
-    "A red circle moving horizontally",
-    "A blue square rotating",
-    "A green triangle bouncing"
+    "Your prompt 1",
+    "Your prompt 2",
+    "Your prompt 3"
 ]
 
 conditional_dict = text_encoder(prompts)
@@ -418,7 +418,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate videos")
     parser.add_argument("--checkpoint", type=str, help="Path to checkpoint")
     parser.add_argument("--prompts", type=str, nargs="+", 
-                       default=["A red circle moving horizontally"],
+                       default=[""],
                        help="Text prompts")
     parser.add_argument("--num_frames", type=int, default=9, help="Number of frames")
     parser.add_argument("--output_dir", type=str, default="outputs/generated",
@@ -492,11 +492,11 @@ python eval.py
 python generate.py
 
 # Generate with custom prompts
-python generate.py --prompts "A red circle" "A blue square" "A green triangle"
+python generate.py --prompts "Your prompt 1" "Your prompt 2" "Your prompt 3"
 
 # Generate with checkpoint
 python generate.py --checkpoint logs/training/checkpoint_step_000010.pt \
-    --prompts "A red circle moving horizontally" \
+    --prompts "Your prompt here" \
     --output_dir outputs/my_generations
 ```
 

@@ -313,12 +313,7 @@ class PretrainingTrainer:
         self.generator.eval()
 
         if prompts is None:
-            sample_prompts = [
-                "A red circle moving horizontally",
-                "A blue square moving vertically",
-                "A green triangle moving diagonally",
-                "A color gradient transitioning"
-            ][:num_samples]
+            sample_prompts = [""] * num_samples
         else:
             sample_prompts = prompts[:num_samples]
 
@@ -798,10 +793,7 @@ def main(cfg: DictConfig):
         # Generate samples
         if trainer.step % viz_interval == 0 and trainer.step > 0:
             print(f"\nGenerating sample videos at step {trainer.step}...")
-            viz_prompts = list(cfg.viz_prompts) if cfg.viz_prompts else [
-                "A red circle moving horizontally",
-                "A blue square moving vertically"
-            ]
+            viz_prompts = list(cfg.viz_prompts) if cfg.viz_prompts else [""] * 4
             trainer.generate_sample_videos(
                 text_encoder=text_encoder,
                 num_samples=4,

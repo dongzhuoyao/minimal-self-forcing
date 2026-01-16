@@ -48,9 +48,3 @@ wandb:
   entity: dpose-team
   name: null
 
-# Visualization Prompts
-viz_prompts:
-  - "A red circle moving horizontally"
-  - "A blue square moving vertically"
-  - "A green triangle moving diagonally"
-  - "A color gradient transitioning from red to blue"

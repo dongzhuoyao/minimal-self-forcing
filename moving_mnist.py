@@ -402,9 +402,11 @@ class MovingMNISTGenerator:
         print("Building label index mapping...")
         self.label_to_indices = {}
         for i, (_, label) in enumerate(self.mnist_dataset):
-            if label.item() not in self.label_to_indices:
-                self.label_to_indices[label.item()] = []
-            self.label_to_indices[label.item()].append(i)
+            # Label is already an int from MNIST dataset
+            label_int = int(label) if isinstance(label, (torch.Tensor, np.integer)) else label
+            if label_int not in self.label_to_indices:
+                self.label_to_indices[label_int] = []
+            self.label_to_indices[label_int].append(i)
         print(f"✓ Indexed {len(self.label_to_indices)} digit classes")
     
     def _get_digit_image(self, digit_label: int) -> np.ndarray:

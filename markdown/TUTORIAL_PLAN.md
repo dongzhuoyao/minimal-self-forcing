@@ -45,9 +45,9 @@ tutorial/
 - Can generate ODE pairs for training
 
 **Example prompts**:
-- "A red circle moving from left to right"
-- "A blue square rotating clockwise"
-- "Color gradient transitioning from blue to red"
+- "Your prompt 1"
+- "Your prompt 2"
+- "Your prompt 3"
 
 ### 2. Evaluation (`evaluation/`)
 **Purpose**: Simple metrics to assess video quality
