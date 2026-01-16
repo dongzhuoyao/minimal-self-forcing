@@ -1,0 +1,49 @@
+# Self-Forcing Training Configuration
+# Usage: python train.py
+# Override: python train.py training.num_steps=2000 checkpoint=logs/pretrain/checkpoint_final.pt
+
+defaults:
+  - config  # Inherit from base config.yaml
+
+# Hydra settings
+hydra:
+  run:
+    dir: ${paths.output_dir}
+  job:
+    chdir: false
+
+# Training Hyperparameters (Self-Forcing specific)
+training:
+  num_steps: 1000              # Number of training steps
+  batch_size: 16               # Batch size
+  lr: 0.0001                   # Learning rate (1e-4)
+  weight_decay: 0.01           # Weight decay for optimizer
+  gradient_clip_norm: 1.0      # Gradient clipping max norm
+
+  # Self-Forcing video generation
+  num_frames: 21               # Number of frames for training (7 blocks × 3 frames)
+  num_frames_per_block: 3      # Frames per block
+  denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
+  context_noise: 0             # Noise level for cache update
+  use_dmd_loss: true           # Use DMD loss (true) or simplified temporal loss (false)
+
+  # Training control
+  save_interval: 100           # Save checkpoint every N steps
+  log_interval: 5              # Log metrics every N steps
+  viz_interval: 100            # Generate sample videos every N steps
+
+  # Dataset
+  num_samples: 20              # Number of training samples in dataset
+  video_height: 64             # Video height
+  video_width: 64              # Video width
+  video_frames: 9              # Number of frames per video in dataset
+
+# Paths
+paths:
+  log_dir: "logs/training"     # Directory for logs and checkpoints
+  output_dir: "outputs/generated"
+
+# Checkpoint to load (null for training from scratch)
+# For fine-tuning after pretraining:
+#   python train.py checkpoint=logs/pretrain/checkpoint_final.pt
+checkpoint: null

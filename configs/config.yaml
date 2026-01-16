@@ -1,89 +1,54 @@
-# Self-Forcing Tutorial Configuration
-# This config contains all hyperparameters for training and generation
+# Base Configuration (shared settings)
+# This file contains shared settings used by both train.yaml and train0.yaml
 
 # Model Architecture
 model:
   in_dim: 3                    # Input channels (RGB)
-  out_dim: 3                  # Output channels
-  dim: 512                    # Hidden dimension (increased from 256)
-  ffn_dim: 2048              # FFN dimension (increased from 1024)
-  num_heads: 8                # Attention heads (increased from 4)
-  num_layers: 6               # Transformer layers (increased from 4)
-  patch_size: [1, 4, 4]       # Patch size for embedding (temporal, height, width)
-  text_dim: 128               # Text embedding dimension
-  freq_dim: 256               # Time embedding dimension
-  num_frame_per_block: 3      # Frames per block for causal mask
+  out_dim: 3                   # Output channels
+  dim: 512                     # Hidden dimension
+  ffn_dim: 2048                # FFN dimension
+  num_heads: 8                 # Attention heads
+  num_layers: 6                # Transformer layers
+  patch_size: [1, 4, 4]        # Patch size for embedding (temporal, height, width)
+  text_dim: 128                # Text embedding dimension
+  freq_dim: 256                # Time embedding dimension
+  num_frame_per_block: 3       # Frames per block for causal mask
 
 # Text Encoder
 text_encoder:
-  text_dim: 128               # Text embedding dimension
-  text_len: 77                # Maximum text length
-  vocab_size: 256             # Vocabulary size (character-level)
-
-# Training Hyperparameters
-training:
-  num_steps: 1000             # Number of training steps
-  batch_size: 16              # Batch size (changed from 64)
-  lr: 0.0001                  # Learning rate (1e-4)
-  weight_decay: 0.01          # Weight decay for optimizer
-  gradient_clip_norm: 1.0     # Gradient clipping max norm
-  
-  # Training video generation
-  num_frames: 21              # Number of frames for training (7 blocks × 3 frames)
-  num_frames_per_block: 3     # Frames per block
-  denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
-  context_noise: 0            # Noise level for cache update
-  use_dmd_loss: true          # Use DMD (Distribution Matching Distillation) loss (true) or simplified temporal loss (false)
-  
-  # Training control
-  save_interval: 100           # Save checkpoint every N steps
-  log_interval: 5             # Log metrics every N steps
-  viz_interval: 100           # Generate sample videos every N steps
-  
-  # Dataset
-  num_samples: 20             # Number of training samples in dataset
-  video_height: 64            # Video height for training
-  video_width: 64             # Video width for training
-  video_frames: 9             # Number of frames per video in dataset
+  text_dim: 128                # Text embedding dimension
+  text_len: 77                 # Maximum text length
+  vocab_size: 256              # Vocabulary size (character-level)
 
 # Dataset Configuration
 dataset:
-  type: "toy"                # Dataset type: "toy" or "moving_mnist"
-  # Moving MNIST specific settings (only used when type="moving_mnist")
-  num_digits: 1              # Number of digits per video (1 or 2)
-  digit_size: 64             # Size of MNIST digit
-  max_velocity: 2.0           # Maximum velocity for digit movement
+  type: "toy"                  # Dataset type: "toy" or "moving_mnist"
+  num_digits: 1                # Number of digits per video (Moving MNIST)
+  digit_size: 64               # Size of MNIST digit
+  max_velocity: 2.0            # Maximum velocity for digit movement
 
 # Generation/Inference Hyperparameters
 generation:
-  num_frames: 9               # Number of frames to generate
-  num_frames_per_block: 3     # Frames per block (must divide num_frames)
+  num_frames: 9                # Number of frames to generate
+  num_frames_per_block: 3      # Frames per block (must divide num_frames)
   denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
-  output_dir: "outputs/generated"  # Output directory for generated videos
-  
-  # Sample generation during training
-  num_viz_samples: 4          # Number of sample videos to generate during training
-  viz_num_frames: 9           # Number of frames for visualization samples
-  gif_fps: 2                  # Frames per second for GIF playback (lower = slower, default: 2)
-
-# Paths and Directories
-paths:
-  log_dir: "logs/training"    # Directory for logs and checkpoints
-  checkpoint: "logs/training/checkpoint_final.pt"  # Default checkpoint path
-  output_dir: "outputs/generated"  # Output directory
+  output_dir: "outputs/generated"
+  num_viz_samples: 4           # Number of sample videos during training
+  viz_num_frames: 9            # Number of frames for visualization
+  gif_fps: 2                   # GIF playback speed
 
 # Device and Randomness
-device: "cuda"                # Device to use (cuda/cpu, auto-detected if not available)
-seed: 42                      # Random seed for reproducibility
+device: "cuda"                 # Device to use (cuda/cpu)
+seed: 42                       # Random seed
 
 # Weights & Biases (wandb) Configuration
 wandb:
-  enabled: true              # Enable wandb logging (set to true to enable)
-  project: "self-forcing"     # W&B project name
-  entity: dpose-team                # W&B entity/team name (null for personal account)
-  name: null                  # W&B run name (null to auto-generate from log_dir)
+  enabled: true
+  project: "self-forcing"
+  entity: dpose-team
+  name: null
 
-# Visualization Prompts (for sample generation during training)
+# Visualization Prompts
 viz_prompts:
   - "A red circle moving horizontally"
   - "A blue square moving vertically"

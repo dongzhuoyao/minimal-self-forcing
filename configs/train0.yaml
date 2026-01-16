@@ -1,0 +1,50 @@
+# Pretraining Configuration (Supervised)
+# Usage: python train0.py
+# Override: python train0.py training.num_steps=2000 paths.log_dir=logs/my_pretrain
+
+defaults:
+  - config  # Inherit from base config.yaml
+
+# Hydra settings
+hydra:
+  run:
+    dir: ${paths.log_dir}
+  job:
+    chdir: false
+
+# Training Hyperparameters (Pretraining specific)
+training:
+  num_steps: 1000              # Number of training steps
+  batch_size: 16               # Batch size
+  lr: 0.0001                   # Learning rate (1e-4)
+  weight_decay: 0.01           # Weight decay for optimizer
+  gradient_clip_norm: 1.0      # Gradient clipping max norm
+
+  # Pretraining settings
+  num_frames_per_block: 3      # Frames per block
+  min_timestep: 0              # Minimum timestep for noise
+  max_timestep: 1000           # Maximum timestep for noise
+  prediction_type: "sample"    # Prediction type: "sample" or "noise"
+
+  # Training control
+  save_interval: 100           # Save checkpoint every N steps
+  log_interval: 10             # Log metrics every N steps
+  viz_interval: 200            # Generate sample videos every N steps
+
+  # Dataset (more samples for pretraining)
+  num_samples: 100             # Number of training samples in dataset
+  video_height: 64             # Video height
+  video_width: 64              # Video width
+  video_frames: 9              # Number of frames per video in dataset
+
+# Paths (different from train.py)
+paths:
+  log_dir: "logs/pretrain"     # Directory for pretraining logs and checkpoints
+  output_dir: "outputs/pretrain"
+
+# Wandb settings (separate project for pretraining)
+wandb:
+  enabled: true
+  project: "self-forcing-pretrain"
+  entity: dpose-team
+  name: null
