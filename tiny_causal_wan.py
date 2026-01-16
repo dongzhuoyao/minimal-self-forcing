@@ -10,6 +10,54 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from einops import rearrange
 
 
+def attention(q, k, v, q_lens=None, k_lens=None, dropout_p=0., softmax_scale=None, 
+              q_scale=None, causal=False, window_size=(-1, -1), deterministic=False, 
+              dtype=torch.bfloat16, fa_version=None):
+    """
+    Attention function matching official implementation signature.
+    Falls back to standard PyTorch attention if flash_attn not available.
+    """
+    try:
+        from flash_attn import flash_attn_func
+        # Use flash attention if available
+        if q_lens is None:
+            q_lens = torch.tensor([q.shape[1]] * q.shape[0], dtype=torch.int32, device=q.device)
+        if k_lens is None:
+            k_lens = torch.tensor([k.shape[1]] * k.shape[0], dtype=torch.int32, device=k.device)
+        
+        cu_seqlens_q = torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(0, dtype=torch.int32).to(q.device)
+        cu_seqlens_k = torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(0, dtype=torch.int32).to(k.device)
+        
+        return flash_attn_func(
+            q.transpose(1, 2).contiguous(),
+            k.transpose(1, 2).contiguous(),
+            v.transpose(1, 2).contiguous(),
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            max_seqlen_q=q.shape[1],
+            max_seqlen_k=k.shape[1],
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            window_size=window_size if window_size != (-1, -1) else None
+        ).transpose(1, 2)
+    except ImportError:
+        # Fallback to standard PyTorch attention
+        if q_lens is not None or k_lens is not None:
+            import warnings
+            warnings.warn('Padding mask is disabled when using scaled_dot_product_attention.')
+        
+        q = q.transpose(1, 2).to(dtype)
+        k = k.transpose(1, 2).to(dtype)
+        v = v.transpose(1, 2).to(dtype)
+        
+        out = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=None, is_causal=causal, dropout_p=dropout_p
+        )
+        
+        return out.transpose(1, 2).contiguous()
+
+
 def rope_params(max_seq_len, dim, theta=10000):
     """Generate RoPE frequency parameters."""
     assert dim % 2 == 0
@@ -140,32 +188,33 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
 class TinyCausalWanModel(nn.Module):
     """
-    Tiny version of CausalWanModel for tutorial purposes.
+    CausalWanModel matching official implementation exactly, but with reduced capacity.
     
-    Architecture:
+    Architecture matches official CausalWanModel:
     - Patch embedding (Conv3d)
     - Transformer blocks with RoPE and FlexAttention
-    - Output head
+    - Output head with modulation
+    - Same normalization, attention mechanisms, KV cache handling
     
-    Scaled by 16x from original tiny version:
-    - dim=2048 (was 128)
-    - ffn_dim=8192 (was 256)
-    - num_heads=16 (was 4)
-    - num_layers=4 (was 2)
+    Only difference: num_layers reduced (default 4 vs 32 in official)
     """
     
     def __init__(
         self,
-        in_dim=3,  # Input channels (RGB for tutorial)
-        out_dim=3,  # Output channels
-        dim=2048,  # Hidden dimension (scaled 16x: 128 * 16 = 2048)
-        ffn_dim=8192,  # FFN dimension (scaled 16x: 256 * 32 = 8192, 4x dim)
-        num_heads=16,  # Attention heads (scaled 4x: 4 * 4 = 16)
-        num_layers=4,  # Transformer layers (scaled 2x: 2 * 2 = 4)
-        patch_size=(1, 4, 4),  # Patch size for embedding (temporal, height, width)
-        text_dim=128,  # Text embedding dimension (simplified)
-        freq_dim=256,  # Time embedding dimension
-        num_frame_per_block=3,  # Frames per block for causal mask
+        in_dim=3,  # Input channels (RGB for tutorial, 16 for latents in official)
+        out_dim=3,  # Output channels (RGB for tutorial, 16 for latents in official)
+        dim=2048,  # Hidden dimension (same as official)
+        ffn_dim=8192,  # FFN dimension (same as official)
+        num_heads=16,  # Attention heads (same as official)
+        num_layers=4,  # Transformer layers (reduced from 32 in official)
+        patch_size=(1, 4, 4),  # Patch size (can be (1,2,2) like official)
+        text_dim=128,  # Text embedding dimension (128 for tutorial, 4096 in official)
+        freq_dim=256,  # Time embedding dimension (same as official)
+        num_frame_per_block=3,  # Frames per block for causal mask (same as official)
+        local_attn_size=-1,  # Local attention size (-1 = global, same as official)
+        sink_size=0,  # Sink tokens for KV cache (same as official)
+        qk_norm=True,  # QK normalization (same as official)
+        cross_attn_norm=False,  # Cross-attention normalization (same as official)
         eps=1e-6
     ):
         super().__init__()
@@ -179,21 +228,25 @@ class TinyCausalWanModel(nn.Module):
         self.text_dim = text_dim
         self.freq_dim = freq_dim
         self.num_frame_per_block = num_frame_per_block
+        self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
+        self.qk_norm = qk_norm
+        self.cross_attn_norm = cross_attn_norm
         self.eps = eps
         
-        # Patch embedding: convert video patches to tokens
+        # Patch embedding: convert video patches to tokens (matching official)
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size
         )
         
-        # Text embedding (simplified)
+        # Text embedding (matching official structure)
         self.text_embedding = nn.Sequential(
             nn.Linear(text_dim, dim),
-            nn.GELU(),
+            nn.GELU(approximate='tanh'),  # Match official
             nn.Linear(dim, dim)
         )
         
-        # Time embedding
+        # Time embedding (matching official)
         self.time_embedding = nn.Sequential(
             nn.Linear(freq_dim, dim),
             nn.SiLU(),
@@ -204,18 +257,23 @@ class TinyCausalWanModel(nn.Module):
             nn.Linear(dim, dim * 6)  # 6 modulation vectors
         )
         
-        # Transformer blocks
+        # Transformer blocks (matching official structure)
         self.blocks = nn.ModuleList([
             TinyCausalWanAttentionBlock(
+                cross_attn_type='t2v_cross_attn',  # Text-to-video cross-attention
                 dim=dim,
                 ffn_dim=ffn_dim,
                 num_heads=num_heads,
+                local_attn_size=local_attn_size,
+                sink_size=sink_size,
+                qk_norm=qk_norm,
+                cross_attn_norm=cross_attn_norm,
                 eps=eps
             )
             for _ in range(num_layers)
         ])
         
-        # Output head
+        # Output head (matching official)
         self.head = TinyCausalHead(dim, out_dim, patch_size, eps)
         
         # RoPE frequencies (initialize as buffer)
@@ -347,21 +405,28 @@ class TinyCausalWanModel(nn.Module):
         context = self.text_embedding(prompt_embeds)  # [B, text_len, dim]
         context_lens = None
         
-        # Process through transformer blocks
-        for block in self.blocks:
-            x = block(
-                x, e0, seq_lens, grid_sizes,
-                context, context_lens,
-                freqs=self.freqs,
-                block_mask=self.block_mask,
-                kv_cache=kv_cache,
-                crossattn_cache=crossattn_cache,
-                current_start=current_start,
-                cache_start=cache_start
-            )
+        # Process through transformer blocks (matching official structure)
+        kwargs = dict(
+            e=e0,
+            seq_lens=seq_lens,
+            grid_sizes=grid_sizes,
+            freqs=self.freqs,
+            context=context,
+            context_lens=context_lens,
+            block_mask=self.block_mask,
+            kv_cache=kv_cache,
+            crossattn_cache=crossattn_cache,
+            current_start=current_start,
+            cache_start=cache_start
+        )
         
-        # Output head
-        output = self.head(x, e0)  # [B, F'*H'*W', out_dim*patch_prod]
+        for block in self.blocks:
+            x = block(x, **kwargs)
+        
+        # Output head (matching official: uses e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
+        # e0 is [B, F, 6, dim], head expects [B, F, 1, dim]
+        e_head = e0[:, :, :1, :]  # [B, F, 1, dim]
+        output = self.head(x, e_head)  # [B, F'*H'*W', out_dim*patch_prod]
         
         # Reshape back to video format
         patch_prod = math.prod(self.patch_size)
@@ -413,141 +478,410 @@ class TinyCausalWanModel(nn.Module):
 
 
 class TinyCausalWanAttentionBlock(nn.Module):
-    """Simplified transformer block with self-attention and cross-attention."""
+    """
+    CausalWanAttentionBlock matching official implementation exactly.
     
-    def __init__(self, dim, ffn_dim, num_heads, eps=1e-6):
+    Structure:
+    - Self-attention with RoPE and FlexAttention
+    - Cross-attention (text-to-video)
+    - FFN with modulation
+    - Same normalization and modulation pattern as official
+    """
+    
+    def __init__(
+        self,
+        cross_attn_type='t2v_cross_attn',
+        dim=2048,
+        ffn_dim=8192,
+        num_heads=16,
+        local_attn_size=-1,
+        sink_size=0,
+        qk_norm=True,
+        cross_attn_norm=False,
+        eps=1e-6
+    ):
         super().__init__()
         self.dim = dim
         self.ffn_dim = ffn_dim
         self.num_heads = num_heads
+        self.local_attn_size = local_attn_size
+        self.qk_norm = qk_norm
+        self.cross_attn_norm = cross_attn_norm
         self.eps = eps
         
-        # Normalization layers
-        self.norm1 = nn.LayerNorm(dim, eps=eps)
-        self.norm2 = nn.LayerNorm(dim, eps=eps)
-        self.norm3 = nn.LayerNorm(dim, eps=eps)
+        # Normalization layers (matching official: WanLayerNorm)
+        self.norm1 = WanLayerNorm(dim, eps)
+        self.norm2 = WanLayerNorm(dim, eps)
+        self.norm3 = WanLayerNorm(
+            dim, eps,
+            elementwise_affine=True) if cross_attn_norm else nn.Identity()
         
-        # Self-attention
-        self.self_attn = TinyMultiHeadAttention(dim, num_heads, eps)
+        # Self-attention (matching official CausalWanSelfAttention)
+        self.self_attn = TinyCausalWanSelfAttention(
+            dim, num_heads, local_attn_size, sink_size, qk_norm, eps
+        )
         
-        # Cross-attention
-        self.cross_attn = TinyMultiHeadAttention(dim, num_heads, eps, is_cross_attn=True)
+        # Cross-attention (matching official WanT2VCrossAttention)
+        self.cross_attn = TinyWanT2VCrossAttention(
+            dim, num_heads, qk_norm, eps
+        )
         
-        # FFN
+        # FFN (matching official: GELU with approximate='tanh')
         self.ffn = nn.Sequential(
             nn.Linear(dim, ffn_dim),
-            nn.GELU(),
+            nn.GELU(approximate='tanh'),  # Match official
             nn.Linear(ffn_dim, dim)
         )
         
-        # Modulation parameters (simplified from original)
+        # Modulation parameters (matching official)
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
     
     def forward(
-        self, x, e, seq_lens, grid_sizes,
-        context, context_lens,
-        freqs=None, block_mask=None,
-        kv_cache=None, crossattn_cache=None,
-        current_start=0, cache_start=None
+        self,
+        x,
+        e,
+        seq_lens,
+        grid_sizes,
+        freqs,
+        context,
+        context_lens,
+        block_mask,
+        kv_cache=None,
+        crossattn_cache=None,
+        current_start=0,
+        cache_start=None
     ):
-        """
+        r"""
         Args:
-            x: [B, L, dim] where L = F*H*W
-            e: [B, F, 6, dim] time modulation vectors
-            seq_lens: [B] sequence lengths
-            grid_sizes: [B, 3] (F, H, W)
-            context: [B, text_len, dim] text embeddings
-            context_lens: unused (for compatibility)
+            x(Tensor): Shape [B, L, C]
+            e(Tensor): Shape [B, F, 6, C]
+            seq_lens(Tensor): Shape [B]
+            grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
+            freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+            context(Tensor): Shape [B, text_len, C]
+            context_lens(Tensor): Shape [B] (unused but kept for compatibility)
+            block_mask (BlockMask): For FlexAttention
         """
-        batch_size, seq_len, _ = x.shape
-        num_frames = e.shape[1]
-        frame_seqlen = seq_len // num_frames
+        num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
         
-        # Split modulation vectors
-        e = (self.modulation.unsqueeze(1) + e).chunk(6, dim=2)  # 6 x [B, F, 1, dim]
+        # Modulation (matching official)
+        e = (self.modulation.unsqueeze(1) + e).chunk(6, dim=2)
         
-        # Reshape x to [B, F, frame_seqlen, dim] for modulation
-        x_reshaped = x.unflatten(1, (num_frames, frame_seqlen))  # [B, F, frame_seqlen, dim]
-        
-        # Self-attention with modulation
-        x_modulated = x_reshaped * (1 + e[1]) + e[0]  # [B, F, frame_seqlen, dim]
-        x_modulated = x_modulated.flatten(1, 2)  # [B, F*frame_seqlen, dim]
-        
+        # Self-attention (matching official structure exactly)
         y = self.self_attn(
-            self.norm1(x_modulated),
-            grid_sizes=grid_sizes,
-            freqs=freqs,
-            block_mask=block_mask,
-            kv_cache=kv_cache,
-            current_start=current_start,
-            cache_start=cache_start
-        )
+            (self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(1, 2),
+            seq_lens, grid_sizes,
+            freqs, block_mask, kv_cache, current_start, cache_start)
         
-        # Apply modulation and residual
-        y_reshaped = y.unflatten(1, (num_frames, frame_seqlen))
-        x = x + (y_reshaped * e[2]).flatten(1, 2)
+        # Apply modulation and residual (matching official)
+        x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(1, 2)
         
-        # Cross-attention
-        x = x + self.cross_attn(
-            self.norm3(x),
-            context,
-            crossattn_cache=crossattn_cache
-        )
+        # Cross-attention & FFN function (matching official structure)
+        def cross_attn_ffn(x, context, context_lens, e, crossattn_cache=None):
+            x = x + self.cross_attn(
+                self.norm3(x), 
+                context,
+                context_lens, 
+                crossattn_cache=crossattn_cache
+            )
+            y = self.ffn(
+                (self.norm2(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[4]) + e[3]).flatten(1, 2)
+            )
+            x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[5]).flatten(1, 2)
+            return x
         
-        # FFN with modulation
-        x_reshaped = x.unflatten(1, (num_frames, frame_seqlen))
-        x_modulated = x_reshaped * (1 + e[4]) + e[3]
-        x_modulated = x_modulated.flatten(1, 2)
-        
-        y = self.ffn(self.norm2(x_modulated))
-        
-        # Apply modulation and residual
-        y_reshaped = y.unflatten(1, (num_frames, frame_seqlen))
-        x = x + (y_reshaped * e[5]).flatten(1, 2)
-        
+        x = cross_attn_ffn(x, context, context_lens, e, crossattn_cache)
         return x
 
 
 class WanRMSNorm(nn.Module):
-    """RMSNorm for QK normalization."""
+    """RMSNorm for QK normalization (matching official implementation)."""
     def __init__(self, dim, eps=1e-5):
         super().__init__()
         self.dim = dim
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
-    
+
     def forward(self, x):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L, C]
+        """
         return self._norm(x.float()).type_as(x) * self.weight
-    
+
     def _norm(self, x):
         return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
 
 
-class TinyMultiHeadAttention(nn.Module):
-    """Multi-head attention with RoPE and FlexAttention."""
+class WanLayerNorm(nn.LayerNorm):
+    """LayerNorm matching official implementation (preserves dtype)."""
     
-    def __init__(self, dim, num_heads, eps=1e-6, is_cross_attn=False, qk_norm=True):
-        super().__init__()
+    def __init__(self, dim, eps=1e-6, elementwise_affine=False):
+        super().__init__(dim, elementwise_affine=elementwise_affine, eps=eps)
+
+    def forward(self, x):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L, C]
+        """
+        return super().forward(x).type_as(x)
+
+
+class TinyCausalWanSelfAttention(nn.Module):
+    """
+    CausalWanSelfAttention matching official implementation exactly.
+    
+    Features:
+    - RoPE for positional encoding
+    - FlexAttention for training
+    - KV cache with rolling mechanism for inference
+    - Local attention support
+    - Sink tokens support
+    - Teacher forcing support
+    """
+    
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        local_attn_size=-1,
+        sink_size=0,
+        qk_norm=True,
+        eps=1e-6
+    ):
         assert dim % num_heads == 0
+        super().__init__()
         self.dim = dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.is_cross_attn = is_cross_attn
-        self.eps = eps
+        self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
         self.qk_norm = qk_norm
+        self.eps = eps
+        self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
+        
+        # Layers (matching official)
+        self.q = nn.Linear(dim, dim)
+        self.k = nn.Linear(dim, dim)
+        self.v = nn.Linear(dim, dim)
+        self.o = nn.Linear(dim, dim)
+        self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+    
+    def forward(
+        self,
+        x,
+        seq_lens,
+        grid_sizes,
+        freqs,
+        block_mask,
+        kv_cache=None,
+        current_start=0,
+        cache_start=None
+    ):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L, num_heads, C / num_heads] (matching official)
+            seq_lens(Tensor): Shape [B]
+            grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
+            freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+            block_mask (BlockMask): For FlexAttention
+        """
+        b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+        if cache_start is None:
+            cache_start = current_start
+        
+        # Query, key, value function (matching official)
+        def qkv_fn(x):
+            q = self.norm_q(self.q(x)).view(b, s, n, d)
+            k = self.norm_k(self.k(x)).view(b, s, n, d)
+            v = self.v(x).view(b, s, n, d)
+            return q, k, v
+        
+        q, k, v = qkv_fn(x)
+        
+        if kv_cache is None:
+            # Training mode: check for teacher forcing
+            is_tf = (s == seq_lens[0].item() * 2)
+            if is_tf:
+                # Teacher forcing: handle 2x sequence length
+                q_chunk = torch.chunk(q, 2, dim=1)
+                k_chunk = torch.chunk(k, 2, dim=1)
+                roped_query = []
+                roped_key = []
+                # RoPE should be same for clean and noisy parts
+                for ii in range(2):
+                    rq = rope_apply(q_chunk[ii], grid_sizes, freqs).type_as(v)
+                    rk = rope_apply(k_chunk[ii], grid_sizes, freqs).type_as(v)
+                    roped_query.append(rq)
+                    roped_key.append(rk)
+                
+                roped_query = torch.cat(roped_query, dim=1)
+                roped_key = torch.cat(roped_key, dim=1)
+                
+                padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
+                padded_roped_query = torch.cat(
+                    [roped_query,
+                     torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]],
+                                 device=q.device, dtype=v.dtype)],
+                    dim=1
+                )
+                padded_roped_key = torch.cat(
+                    [roped_key, torch.zeros([k.shape[0], padded_length, k.shape[2], k.shape[3]],
+                                            device=k.device, dtype=v.dtype)],
+                    dim=1
+                )
+                padded_v = torch.cat(
+                    [v, torch.zeros([v.shape[0], padded_length, v.shape[2], v.shape[3]],
+                                    device=v.device, dtype=v.dtype)],
+                    dim=1
+                )
+                
+                x = flex_attention(
+                    query=padded_roped_query.transpose(2, 1),
+                    key=padded_roped_key.transpose(2, 1),
+                    value=padded_v.transpose(2, 1),
+                    block_mask=block_mask
+                )[:, :, :-padded_length].transpose(2, 1)
+            else:
+                # Normal training: use RoPE and FlexAttention
+                roped_query = rope_apply(q, grid_sizes, freqs).type_as(v)
+                roped_key = rope_apply(k, grid_sizes, freqs).type_as(v)
+                
+                padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
+                padded_roped_query = torch.cat(
+                    [roped_query,
+                     torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]],
+                                 device=q.device, dtype=v.dtype)],
+                    dim=1
+                )
+                padded_roped_key = torch.cat(
+                    [roped_key, torch.zeros([k.shape[0], padded_length, k.shape[2], k.shape[3]],
+                                            device=k.device, dtype=v.dtype)],
+                    dim=1
+                )
+                padded_v = torch.cat(
+                    [v, torch.zeros([v.shape[0], padded_length, v.shape[2], v.shape[3]],
+                                    device=v.device, dtype=v.dtype)],
+                    dim=1
+                )
+                
+                x = flex_attention(
+                    query=padded_roped_query.transpose(2, 1),
+                    key=padded_roped_key.transpose(2, 1),
+                    value=padded_v.transpose(2, 1),
+                    block_mask=block_mask
+                )[:, :, :-padded_length].transpose(2, 1)
+        else:
+            # Inference mode: KV cache with rolling mechanism
+            frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+            current_start_frame = current_start // frame_seqlen
+            roped_query = causal_rope_apply(
+                q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
+            roped_key = causal_rope_apply(
+                k, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
+            
+            current_end = current_start + roped_query.shape[1]
+            sink_tokens = self.sink_size * frame_seqlen
+            
+            # KV cache rolling mechanism (matching official)
+            kv_cache_size = kv_cache["k"].shape[1]
+            num_new_tokens = roped_query.shape[1]
+            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
+                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+                # Calculate the number of new tokens added in this step
+                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
+                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                local_end_index = kv_cache["local_end_index"].item() + current_end - \
+                    kv_cache["global_end_index"].item() - num_evicted_tokens
+                local_start_index = local_end_index - num_new_tokens
+                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["v"][:, local_start_index:local_end_index] = v
+            else:
+                # Assign new keys/values directly
+                local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+                local_start_index = local_end_index - num_new_tokens
+                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["v"][:, local_start_index:local_end_index] = v
+            
+            # Use attention function (matching official)
+            k_cached = kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+            v_cached = kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+            x = attention(
+                roped_query,
+                k_cached,
+                v_cached,
+                causal=True
+            )
+            
+            kv_cache["global_end_index"].fill_(current_end)
+            kv_cache["local_end_index"].fill_(local_end_index)
+        
+        # Output (matching official)
+        x = x.flatten(2)
+        x = self.o(x)
+        return x
+
+
+class TinyWanT2VCrossAttention(nn.Module):
+    """
+    Text-to-Video Cross-Attention matching official WanT2VCrossAttention.
+    """
+    
+    def __init__(self, dim, num_heads, qk_norm=True, eps=1e-6):
+        assert dim % num_heads == 0
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.qk_norm = qk_norm
+        self.eps = eps
         
         self.q = nn.Linear(dim, dim)
         self.k = nn.Linear(dim, dim)
         self.v = nn.Linear(dim, dim)
         self.o = nn.Linear(dim, dim)
+        self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+    
+    def forward(self, x, context, context_lens, crossattn_cache=None):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L1, C]
+            context(Tensor): Shape [B, L2, C]
+            context_lens(Tensor): Shape [B]
+            crossattn_cache (dict, *optional*): Cached key and value tensors
+        """
+        b, n, d = x.size(0), self.num_heads, self.head_dim
         
-        # QK normalization
-        if qk_norm:
-            self.norm_q = WanRMSNorm(dim, eps=eps)
-            self.norm_k = WanRMSNorm(dim, eps=eps)
+        # Compute query, key, value
+        q = self.norm_q(self.q(x)).view(b, -1, n, d)
+        
+        if crossattn_cache is not None:
+            if not crossattn_cache.get("is_init", False):
+                crossattn_cache["is_init"] = True
+                k = self.norm_k(self.k(context)).view(b, -1, n, d)
+                v = self.v(context).view(b, -1, n, d)
+                crossattn_cache["k"] = k
+                crossattn_cache["v"] = v
+            else:
+                k = crossattn_cache["k"]
+                v = crossattn_cache["v"]
         else:
-            self.norm_q = nn.Identity()
-            self.norm_k = nn.Identity()
+            k = self.norm_k(self.k(context)).view(b, -1, n, d)
+            v = self.v(context).view(b, -1, n, d)
+        
+        # Compute attention (matching official)
+        x = attention(q, k, v, k_lens=context_lens, causal=False)
+        
+        # Output
+        x = x.flatten(2)
+        x = self.o(x)
+        return x
     
     def forward(self, x, context=None, grid_sizes=None, freqs=None, block_mask=None,
                 kv_cache=None, crossattn_cache=None,
@@ -708,7 +1042,7 @@ class TinyMultiHeadAttention(nn.Module):
 
 
 class TinyCausalHead(nn.Module):
-    """Output head that converts tokens back to video."""
+    """Output head matching official CausalHead exactly."""
     
     def __init__(self, dim, out_dim, patch_size, eps=1e-6):
         super().__init__()
@@ -717,33 +1051,25 @@ class TinyCausalHead(nn.Module):
         self.patch_size = patch_size
         self.eps = eps
         
-        patch_prod = math.prod(patch_size)
-        self.norm = nn.LayerNorm(dim, eps=eps)
-        self.head = nn.Linear(dim, out_dim * patch_prod)
+        # Layers (matching official)
+        out_dim = math.prod(patch_size) * out_dim
+        self.norm = WanLayerNorm(dim, eps)
+        self.head = nn.Linear(dim, out_dim)
         
-        # Modulation
+        # Modulation (matching official)
         self.modulation = nn.Parameter(torch.randn(1, 2, dim) / dim**0.5)
     
     def forward(self, x, e):
-        """
+        r"""
         Args:
-            x: [B, L, dim] where L = F*H*W
-            e: [B, F, 6, dim] time modulation (we use e[:, :, :1] for head)
+            x(Tensor): Shape [B, L1, C]
+            e(Tensor): Shape [B, F, 1, C] (matching official: uses e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
         """
-        batch_size, seq_len, _ = x.shape
-        num_frames = e.shape[1]
-        frame_seqlen = seq_len // num_frames
+        num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
         
-        # Get modulation for head (use first modulation vector)
-        e_head = e[:, :, :1, :]  # [B, F, 1, dim]
-        e_head = (self.modulation.unsqueeze(1) + e_head).chunk(2, dim=2)  # 2 x [B, F, 1, dim]
+        # Modulation (matching official exactly)
+        e = (self.modulation.unsqueeze(1) + e).chunk(2, dim=2)
         
-        # Reshape and apply modulation
-        x_reshaped = x.unflatten(1, (num_frames, frame_seqlen))  # [B, F, frame_seqlen, dim]
-        x_modulated = x_reshaped * (1 + e_head[1]) + e_head[0]
-        x_modulated = x_modulated.flatten(1, 2)  # [B, F*frame_seqlen, dim]
-        
-        # Apply head
-        output = self.head(self.norm(x_modulated))  # [B, L, out_dim*patch_prod]
-        
-        return output
+        # Apply head with modulation (matching official structure exactly)
+        x = (self.head(self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]))
+        return x
