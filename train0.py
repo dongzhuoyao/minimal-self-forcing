@@ -305,17 +305,35 @@ class PretrainingTrainer:
         text_encoder: nn.Module,
         num_samples: int = 4,
         num_frames: int = 9,
-        prompts: Optional[List[str]] = None,
+        digits: Optional[List[int]] = None,
         ground_truth_videos: Optional[torch.Tensor] = None,
         gif_fps: int = 2
     ):
-        """Generate sample videos for visualization."""
+        """Generate sample videos for visualization.
+        
+        Args:
+            text_encoder: Text encoder model
+            num_samples: Number of videos to generate
+            num_frames: Number of frames per video
+            digits: List of digit labels (0-9) to visualize. If None, uses empty strings.
+            ground_truth_videos: Optional ground truth videos for comparison
+            gif_fps: FPS for GIF output
+        """
         self.generator.eval()
 
-        if prompts is None:
+        if digits is None:
+            # Use empty strings if no digits specified
             sample_prompts = [""] * num_samples
+            digit_labels = None
         else:
-            sample_prompts = prompts[:num_samples]
+            # Convert digits to text strings for text encoder
+            sample_prompts = [str(d) for d in digits[:num_samples]]
+            digit_labels = digits[:num_samples]
+            # Pad with empty strings if needed
+            while len(sample_prompts) < num_samples:
+                sample_prompts.append("")
+                if digit_labels is not None:
+                    digit_labels.append(None)
 
         with torch.no_grad():
             conditional_dict = text_encoder(sample_prompts)
@@ -323,13 +341,15 @@ class PretrainingTrainer:
             batch_size = len(sample_prompts)
             height, width = 64, 64
 
-            # Start from pure noise
+            # Start from pure noise (normalized to match data range)
+            # Flow Matching starts from noise distribution, typically N(0,1)
             noise = torch.randn(
                 batch_size, num_frames, 3, height, width,
                 device=self.device
             )
 
             # Simple iterative denoising with Flow Matching
+            # Use Euler steps: x_next = x_current + flow * (sigma_next - sigma_current)
             denoising_steps = [1000, 750, 500, 250, 0]
             x = noise
 
@@ -341,33 +361,34 @@ class PretrainingTrainer:
                     dtype=torch.long
                 )
 
+                # Predict flow at current timestep
                 flow_pred, _ = self.generator(x, timestep, conditional_dict)
                 
-                # Convert flow_pred to x0_pred for next step
-                x0_pred = self.scheduler.convert_flow_to_x0(
-                    flow_pred.flatten(0, 1),
-                    x.flatten(0, 1),
-                    timestep.flatten(0, 1)
-                ).unflatten(0, (batch_size, num_frames))
-
-                # Move towards prediction
+                # Use Flow Matching Euler step: x_next = x_current + flow * (sigma_next - sigma_current)
+                # This correctly follows the ODE dx/dt = flow
                 if i < len(denoising_steps) - 2:
+                    # Not the last step: step to next timestep
                     next_t = denoising_steps[i + 1]
-                    # Add noise for next timestep
-                    noise_new = torch.randn_like(x0_pred)
                     next_timestep = torch.full(
                         (batch_size, num_frames),
                         next_t,
                         device=self.device,
                         dtype=torch.long
                     )
-                    x = self.scheduler.add_noise(
-                        x0_pred.flatten(0, 1),
-                        noise_new.flatten(0, 1),
-                        next_timestep.flatten(0, 1)
+                    # Use scheduler.step for proper Flow Matching sampling
+                    x = self.scheduler.step(
+                        flow_pred.flatten(0, 1),
+                        timestep.flatten(0, 1),
+                        x.flatten(0, 1)
                     ).unflatten(0, (batch_size, num_frames))
                 else:
-                    x = x0_pred
+                    # Last step: step to final (sigma=0)
+                    x = self.scheduler.step(
+                        flow_pred.flatten(0, 1),
+                        timestep.flatten(0, 1),
+                        x.flatten(0, 1),
+                        to_final=True
+                    ).unflatten(0, (batch_size, num_frames))
 
             generated_videos = x
 
@@ -384,7 +405,12 @@ class PretrainingTrainer:
 
             # Save grid
             grid_path = self.samples_dir / f"step_{self.step:06d}_grid.png"
-            save_video_grid(videos_list, str(grid_path), prompts=sample_prompts)
+            # Format labels for visualization: "Digit 0", "Digit 1", etc.
+            if digit_labels:
+                labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
+            else:
+                labels_for_viz = sample_prompts
+            save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
 
             print(f"  Saved sample videos to {self.samples_dir}")
 
@@ -394,13 +420,14 @@ class PretrainingTrainer:
                     "samples/grid": wandb.Image(str(grid_path)),
                 }, step=self.step)
 
-                for i, (video_tensor, prompt) in enumerate(zip(videos_list, sample_prompts)):
+                for i, video_tensor in enumerate(videos_list):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
+                    caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
                     wandb.log({
                         f"samples/video_{i}": wandb.Video(
                             str(gif_path),
                             format="gif",
-                            caption=prompt
+                            caption=caption
                         ),
                     }, step=self.step)
 
@@ -572,6 +599,67 @@ class SimpleScheduler:
         x0_pred = self.convert_flow_to_x0(flow_pred, xt, timestep)
         noise_pred = flow_pred + x0_pred
         return noise_pred
+    
+    def step(self, flow_pred, timestep, sample, to_final=False):
+        """
+        Perform one Flow Matching sampling step (Euler step).
+        
+        Flow Matching ODE: dx/dt = flow
+        Euler step: x_next = x_current + flow * (sigma_next - sigma_current)
+        
+        Args:
+            flow_pred: Flow prediction [B*F, C, H, W] or [B, F, C, H, W]
+            timestep: Current timestep [B*F] or [B, F] (values in [0, 1000])
+            sample: Current sample [B*F, C, H, W] or [B, F, C, H, W]
+            to_final: If True, step to final (sigma=0 for forward, sigma=1 for reverse)
+            
+        Returns:
+            prev_sample: Updated sample [B*F, C, H, W] or [B, F, C, H, W]
+        """
+        original_shape = sample.shape
+        if timestep.ndim == 2:
+            timestep_flat = timestep.flatten(0, 1)
+            sample_flat = sample.flatten(0, 1)
+            flow_pred_flat = flow_pred.flatten(0, 1)
+        else:
+            timestep_flat = timestep
+            sample_flat = sample
+            flow_pred_flat = flow_pred
+        
+        # Move timesteps and sigmas to same device
+        device = timestep_flat.device
+        timesteps = self.timesteps.to(device)
+        sigmas = self.sigmas.to(device)
+        
+        # Get current sigma
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep_flat.unsqueeze(1)).abs(), dim=1
+        )
+        sigma = sigmas[timestep_id]
+        
+        # Get next sigma
+        if to_final or (timestep_id + 1 >= len(timesteps)).any():
+            # Step to final (sigma=0 for denoising)
+            sigma_next = torch.zeros_like(sigma)
+        else:
+            sigma_next = sigmas[timestep_id + 1]
+        
+        # Reshape for broadcasting
+        if len(sample_flat.shape) == 4:
+            sigma = sigma.view(-1, 1, 1, 1)
+            sigma_next = sigma_next.view(-1, 1, 1, 1)
+        elif len(sample_flat.shape) == 5:
+            sigma = sigma.view(-1, 1, 1, 1, 1)
+            sigma_next = sigma_next.view(-1, 1, 1, 1, 1)
+        
+        # Euler step: x_next = x_current + flow * (sigma_next - sigma_current)
+        prev_sample = sample_flat + flow_pred_flat * (sigma_next - sigma)
+        
+        # Reshape back if needed
+        if timestep.ndim == 2:
+            prev_sample = prev_sample.unflatten(0, original_shape[:2])
+        
+        return prev_sample
 
 
 class SimpleTextEncoder(nn.Module):
@@ -793,12 +881,14 @@ def main(cfg: DictConfig):
         # Generate samples
         if trainer.step % viz_interval == 0 and trainer.step > 0:
             print(f"\nGenerating sample videos at step {trainer.step}...")
-            viz_prompts = list(cfg.viz_prompts) if cfg.viz_prompts else [""] * 4
+            # Get digits to visualize (default to [0, 1, 2, 3] if not specified)
+            num_viz_samples = cfg.generation.num_viz_samples
+            viz_digits = list(cfg.viz_digits) if cfg.viz_digits else list(range(min(10, num_viz_samples)))
             trainer.generate_sample_videos(
                 text_encoder=text_encoder,
-                num_samples=4,
+                num_samples=num_viz_samples,
                 num_frames=video_frames,
-                prompts=viz_prompts,
+                digits=viz_digits,
                 gif_fps=cfg.generation.gif_fps
             )
 

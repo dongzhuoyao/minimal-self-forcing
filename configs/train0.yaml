@@ -43,6 +43,6 @@ training:
 # Wandb settings (separate project for pretraining)
 wandb:
   enabled: true
-  project: "self-forcing"
+  project: "minimal-self-forcing"
   entity: dpose-team
   name: null

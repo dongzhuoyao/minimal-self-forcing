@@ -46,3 +46,10 @@ training:
 # For fine-tuning after pretraining:
 #   python train.py checkpoint=logs/pretrain/checkpoint_final.pt
 checkpoint: null
+
+# Wandb settings (separate project for pretraining)
+wandb:
+  enabled: true
+  project: "minimal-self-forcing"
+  entity: dpose-team
+  name: null

@@ -124,6 +124,10 @@ class SimplifiedTrainer:
             "step": []
         }
         
+        # Moving average loss tracker (exponential moving average)
+        self.average_loss = None
+        self.smoothing_decay = 0.99  # EMA decay factor
+        
         # Cached unconditional dict (for efficiency)
         self.unconditional_dict = None
 
@@ -215,9 +219,18 @@ class SimplifiedTrainer:
         self.optimizer.step()
 
         # Step 8: Update metrics
+        loss_value = loss.item()
+        
+        # Update moving average loss (exponential moving average)
+        if self.average_loss is None:
+            self.average_loss = loss_value
+        else:
+            self.average_loss = self.smoothing_decay * self.average_loss + (1 - self.smoothing_decay) * loss_value
+        
         metrics = {
-            "loss": loss.item(),
-            "generator_loss": loss.item(),
+            "loss": loss_value,
+            "generator_loss": loss_value,
+            "average_loss": self.average_loss,
             "grad_norm": grad_norm.item(),
             "num_frames": num_generated_frames,
             "step": self.step
@@ -228,8 +241,8 @@ class SimplifiedTrainer:
             metrics.update({k: v.item() if torch.is_tensor(v) else v 
                            for k, v in log_dict.items()})
 
-        self.metrics_history["loss"].append(loss.item())
-        self.metrics_history["generator_loss"].append(loss.item())
+        self.metrics_history["loss"].append(loss_value)
+        self.metrics_history["generator_loss"].append(loss_value)
         if "dmd_gradient_norm" in log_dict:
             self.metrics_history["dmd_gradient_norm"].append(
                 log_dict["dmd_gradient_norm"].item() if torch.is_tensor(log_dict["dmd_gradient_norm"]) 
@@ -261,6 +274,8 @@ class SimplifiedTrainer:
     def _log_metrics(self, metrics: Dict[str, float]):
         """Log metrics to console and wandb."""
         loss_str = f"Loss = {metrics['loss']:.8f}"
+        if "average_loss" in metrics:
+            loss_str += f", AvgLoss = {metrics['average_loss']:.8f}"
         if "grad_norm" in metrics:
             loss_str += f", GradNorm = {metrics['grad_norm']:.4f}"
         if "dmd_gradient_norm" in metrics:
@@ -336,17 +351,36 @@ class SimplifiedTrainer:
         num_samples: int = 4,
         num_frames: int = 9,
         num_frames_per_block: int = 3,
-        prompts: Optional[List[str]] = None,
+        digits: Optional[List[int]] = None,
         ground_truth_videos: Optional[torch.Tensor] = None,
         gif_fps: int = 2
     ):
-        """Generate sample videos for visualization during training."""
+        """Generate sample videos for visualization during training.
+        
+        Args:
+            text_encoder: Text encoder model
+            num_samples: Number of videos to generate
+            num_frames: Number of frames per video
+            num_frames_per_block: Frames per block for autoregressive generation
+            digits: List of digit labels (0-9) to visualize. If None, uses empty strings.
+            ground_truth_videos: Optional ground truth videos for comparison
+            gif_fps: FPS for GIF output
+        """
         self.generator.eval()
 
-        if prompts is None:
+        if digits is None:
+            # Use empty strings if no digits specified
             sample_prompts = [""] * num_samples
+            digit_labels = None
         else:
-            sample_prompts = prompts[:num_samples]
+            # Convert digits to text strings for text encoder
+            sample_prompts = [str(d) for d in digits[:num_samples]]
+            digit_labels = digits[:num_samples]
+            # Pad with empty strings if needed
+            while len(sample_prompts) < num_samples:
+                sample_prompts.append("")
+                if digit_labels is not None:
+                    digit_labels.append(None)
 
         with torch.no_grad():
             conditional_dict = text_encoder(sample_prompts)
@@ -411,18 +445,23 @@ class SimplifiedTrainer:
 
             # Save grid
             grid_path = self.samples_dir / f"step_{self.step:06d}_grid.png"
-            save_video_grid(videos_list, str(grid_path), prompts=sample_prompts)
+            # Format labels for visualization: "Digit 0", "Digit 1", etc.
+            if digit_labels:
+                labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
+            else:
+                labels_for_viz = sample_prompts
+            save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
 
             comparison_grid_path = None
             if gt_videos_list is not None:
                 comparison_grid_path = self.samples_dir / f"step_{self.step:06d}_comparison_grid.png"
                 comparison_videos = []
                 comparison_prompts = []
-                for gen_vid, gt_vid, prompt in zip(videos_list, gt_videos_list, sample_prompts):
+                for gen_vid, gt_vid, label in zip(videos_list, gt_videos_list, labels_for_viz):
                     comparison_videos.append(gen_vid)
                     comparison_videos.append(gt_vid)
-                    comparison_prompts.append(f"{prompt} (Generated)")
-                    comparison_prompts.append(f"{prompt} (Ground Truth)")
+                    comparison_prompts.append(f"{label} (Generated)")
+                    comparison_prompts.append(f"{label} (Ground Truth)")
                 save_video_grid(comparison_videos, str(comparison_grid_path), prompts=comparison_prompts, ncols=2)
 
             print(f"  Saved sample videos to {self.samples_dir}")
@@ -771,12 +810,13 @@ def main(cfg: DictConfig):
         # Generate sample videos
         if trainer.step % viz_interval == 0 and trainer.step > 0:
             print(f"\nGenerating sample videos at step {trainer.step}...")
-            viz_prompts = list(cfg.viz_prompts) if cfg.viz_prompts else [""] * cfg.generation.num_viz_samples
+            # Get digits to visualize (default to [0, 1, 2, 3] if not specified)
+            num_viz_samples = cfg.generation.num_viz_samples
+            viz_digits = list(cfg.viz_digits) if cfg.viz_digits else list(range(min(4, num_viz_samples)))
 
             ground_truth_videos = None
             if "video" in batch:
                 batch_videos = batch["video"]
-                num_viz_samples = cfg.generation.num_viz_samples
 
                 if isinstance(batch_videos, list):
                     batch_videos = [v.to(trainer.device) for v in batch_videos[:num_viz_samples]]
@@ -789,10 +829,10 @@ def main(cfg: DictConfig):
 
             trainer.generate_sample_videos(
                 text_encoder=text_encoder,
-                num_samples=cfg.generation.num_viz_samples,
+                num_samples=num_viz_samples,
                 num_frames=cfg.generation.viz_num_frames,
                 num_frames_per_block=num_frame_per_block,
-                prompts=viz_prompts,
+                digits=viz_digits,
                 ground_truth_videos=ground_truth_videos,
                 gif_fps=cfg.generation.gif_fps
             )

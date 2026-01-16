@@ -33,9 +33,12 @@ generation:
   num_frames_per_block: 3      # Frames per block (must divide num_frames)
   denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
   output_dir: "outputs/generated"
-  num_viz_samples: 4           # Number of sample videos during training
+  num_viz_samples: 10          # Number of sample videos during training
   viz_num_frames: 9            # Number of frames for visualization
   gif_fps: 2                   # GIF playback speed
+
+# Visualization digits for training (list of digits 0-9, null = random digits)
+viz_digits: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 # Device and Randomness
 device: "cuda"                 # Device to use (cuda/cpu)
