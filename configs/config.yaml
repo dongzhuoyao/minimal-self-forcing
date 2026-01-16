@@ -5,10 +5,10 @@
 model:
   in_dim: 3                    # Input channels (RGB)
   out_dim: 3                   # Output channels
-  dim: 512                     # Hidden dimension
-  ffn_dim: 2048                # FFN dimension
+  dim: 256                     # Hidden dimension (reduced for ~5M params)
+  ffn_dim: 1024                # FFN dimension (reduced for ~5M params)
   num_heads: 8                 # Attention heads
-  num_layers: 6                # Transformer layers
+  num_layers: 4                # Transformer layers (reduced for ~5M params)
   patch_size: [1, 4, 4]        # Patch size for embedding (temporal, height, width)
   text_dim: 128                # Text embedding dimension
   freq_dim: 256                # Time embedding dimension

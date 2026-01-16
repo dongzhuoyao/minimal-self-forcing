@@ -29,7 +29,7 @@ training:
   prediction_type: "sample"    # Prediction type: "sample" or "noise"
 
   # Training control
-  save_interval: 100           # Save checkpoint every N steps
+  save_interval: 1000           # Save checkpoint every N steps
   log_interval: 10             # Log metrics every N steps
   viz_interval: 200            # Generate sample videos every N steps
 
