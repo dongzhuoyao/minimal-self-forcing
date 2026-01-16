@@ -14,3 +14,4 @@ logs/training/metrics_history.json
 logs/training/plots/loss.png
 logs/training/samples/
 logs/training/wandb/
+logs/

@@ -7,8 +7,10 @@ defaults:
 
 # Hydra settings
 hydra:
-  run:
-    dir: ${paths.output_dir}
+  # Use default Hydra output directory (outputs/)
+  # To customize: uncomment and set dir: ${paths.output_dir}
+  # run:
+  #   dir: ${paths.output_dir}
   job:
     chdir: false
 

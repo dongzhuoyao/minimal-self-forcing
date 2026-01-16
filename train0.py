@@ -431,6 +431,7 @@ class SimpleScheduler:
         self.sigma_min = sigma_min
         
         # Create timesteps [0, 1000] -> [1000, 0] for compatibility
+        # Don't register as buffer - will move to device dynamically
         self.timesteps = torch.linspace(num_train_timesteps, 0, num_train_timesteps)
         
         # Create sigmas for Flow Matching: sigma(t) = t * (sigma_max - sigma_min) + sigma_min
@@ -458,11 +459,16 @@ class SimpleScheduler:
         if timestep.ndim == 2:
             timestep = timestep.flatten(0, 1)
         
+        # Move timesteps and sigmas to same device as input
+        device = timestep.device
+        timesteps = self.timesteps.to(device)
+        sigmas = self.sigmas.to(device)
+        
         # Convert timestep to sigma
         timestep_id = torch.argmin(
-            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
         )
-        sigma = self.sigmas[timestep_id]
+        sigma = sigmas[timestep_id]
         
         # Reshape sigma for broadcasting
         if len(x.shape) == 4:
@@ -502,11 +508,15 @@ class SimpleScheduler:
         else:
             timestep_flat = timestep
         
-        self.linear_timesteps_weights = self.linear_timesteps_weights.to(timestep.device)
+        # Move timesteps and weights to same device
+        device = timestep.device
+        timesteps = self.timesteps.to(device)
+        weights = self.linear_timesteps_weights.to(device)
+        
         timestep_id = torch.argmin(
-            (self.timesteps.unsqueeze(1) - timestep_flat.unsqueeze(0)).abs(), dim=0
+            (timesteps.unsqueeze(1) - timestep_flat.unsqueeze(0)).abs(), dim=0
         )
-        weights = self.linear_timesteps_weights[timestep_id]
+        weights = weights[timestep_id]
         
         if timestep.ndim == 2:
             weights = weights.unflatten(0, timestep.shape)
@@ -532,10 +542,15 @@ class SimpleScheduler:
         if timestep.ndim == 2:
             timestep = timestep.flatten(0, 1)
         
+        # Move timesteps and sigmas to same device
+        device = timestep.device
+        timesteps = self.timesteps.to(device)
+        sigmas = self.sigmas.to(device)
+        
         timestep_id = torch.argmin(
-            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
         )
-        sigma_t = self.sigmas[timestep_id]
+        sigma_t = sigmas[timestep_id]
         
         if len(xt.shape) == 4:
             sigma_t = sigma_t.view(-1, 1, 1, 1)
