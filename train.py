@@ -23,8 +23,7 @@ import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
-from moving_mnist import MovingMNISTDataset
-from visualization import TrainingPlotter, create_video_gif, save_video_grid
+from moving_mnist import MovingMNISTDataset, TrainingPlotter, create_video_gif, save_video_grid
 from tiny_causal_wan import TinyCausalWanModel
 from dynamic_sf import SelfForcingEngine
 

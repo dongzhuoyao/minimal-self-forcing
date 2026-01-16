@@ -199,6 +199,109 @@ def display_video(video, title="Video", fps=8):
     return anim
 
 
+class TrainingPlotter:
+    """
+    Plotter for tracking training metrics and generating plots.
+    
+    Usage:
+        plotter = TrainingPlotter(save_dir="logs/plots")
+        plotter.log_metric("loss", 0.5, step=100)
+        plotter.plot_metric("loss", title="Training Loss")
+        plotter.save_history("metrics.json")
+    """
+    
+    def __init__(self, save_dir: Optional[str] = None):
+        """
+        Args:
+            save_dir: Directory to save plots (None = don't save)
+        """
+        self.save_dir = Path(save_dir) if save_dir else None
+        if self.save_dir:
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.metrics = {}  # {metric_name: [(step, value), ...]}
+    
+    def log_metric(self, name: str, value: float, step: int):
+        """
+        Log a metric value at a given step.
+        
+        Args:
+            name: Metric name (e.g., "loss")
+            value: Metric value
+            step: Training step
+        """
+        if name not in self.metrics:
+            self.metrics[name] = []
+        self.metrics[name].append((step, value))
+    
+    def plot_metric(self, name: str, title: Optional[str] = None):
+        """
+        Plot a metric over training steps.
+        
+        Args:
+            name: Metric name to plot
+            title: Plot title (None = use metric name)
+        """
+        if not VISUALIZATION_AVAILABLE:
+            print(f"Warning: Cannot plot {name} - visualization packages not available")
+            return
+        
+        if name not in self.metrics or len(self.metrics[name]) == 0:
+            print(f"Warning: No data for metric '{name}'")
+            return
+        
+        steps, values = zip(*self.metrics[name])
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(steps, values, linewidth=2)
+        plt.xlabel("Step")
+        plt.ylabel(name.capitalize())
+        plt.title(title or f"{name.capitalize()} over Training")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        if self.save_dir:
+            plot_path = self.save_dir / f"{name}.png"
+            plt.savefig(plot_path, dpi=150)
+            print(f"Saved plot to {plot_path}")
+        else:
+            plt.show()
+        
+        plt.close()
+    
+    def save_history(self, output_path: Optional[str] = None):
+        """
+        Save metric history to JSON file.
+        
+        Args:
+            output_path: Path to save JSON (None = use save_dir/metrics_history.json)
+        """
+        import json
+        
+        if output_path is None:
+            if self.save_dir:
+                output_path = self.save_dir / "metrics_history.json"
+            else:
+                print("Warning: No save_dir or output_path provided, cannot save history")
+                return
+        
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Convert to serializable format
+        history = {}
+        for name, data in self.metrics.items():
+            history[name] = {
+                "steps": [step for step, _ in data],
+                "values": [value for _, value in data]
+            }
+        
+        with open(output_path, 'w') as f:
+            json.dump(history, f, indent=2)
+        
+        print(f"Saved metric history to {output_path}")
+
+
 class MovingMNISTGenerator:
     """Generate Moving MNIST videos - digits moving and bouncing around."""
     

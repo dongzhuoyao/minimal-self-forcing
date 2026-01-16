@@ -19,7 +19,7 @@ sys.path.insert(0, str(root_dir))
 
 from tiny_causal_wan import TinyCausalWanModel
 from trainer import SimpleScheduler, SimpleTextEncoder
-from visualization import create_video_gif, save_video_grid
+from moving_mnist import create_video_gif, save_video_grid
 
 
 class SimpleKVCache:
