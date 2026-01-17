@@ -405,11 +405,27 @@ class PretrainingTrainer:
                 ground_truth_videos = ground_truth_videos.clamp(0, 1)
 
                 # Resize if needed
+                # ground_truth_videos shape: [num_samples, F, C, H, W]
+                # generated_videos shape: [num_samples, F, C, H, W]
                 if ground_truth_videos.shape[2:] != generated_videos.shape[2:]:
                     gt_resized = []
                     for gt_vid in ground_truth_videos:
+                        # gt_vid shape: [F, C, H, W]
+                        # Squeeze out any extra batch dimensions
+                        while gt_vid.dim() > 4:
+                            gt_vid = gt_vid.squeeze(0)
+                        
                         frames_resized = []
-                        for frame in gt_vid:
+                        # Iterate over frames: frame shape is [C, H, W]
+                        for frame_idx in range(gt_vid.shape[0]):
+                            frame = gt_vid[frame_idx]  # [C, H, W]
+                            
+                            # Ensure frame is 3D [C, H, W]
+                            if frame.dim() != 3:
+                                # If somehow still has extra dims, squeeze them
+                                while frame.dim() > 3:
+                                    frame = frame.squeeze(0)
+                            
                             frame_np = frame.permute(1, 2, 0).cpu().numpy()
                             from PIL import Image
                             img = Image.fromarray((frame_np * 255).astype(np.uint8))
@@ -850,9 +866,8 @@ def main(cfg: DictConfig):
         for i in range(min(num_viz_samples, len(dataset))):
             sample = dataset[i]
             video = sample["video"]  # Shape: [F, C, H, W]
-            # Add batch dimension: [1, F, C, H, W]
-            gt_videos_list.append(video.unsqueeze(0))
-        # Stack to [num_viz_samples, F, C, H, W]
+            gt_videos_list.append(video)
+        # Stack to [num_viz_samples, F, C, H, W] (no extra batch dimension)
         if gt_videos_list:
             ground_truth_videos_for_viz = torch.stack(gt_videos_list, dim=0)
 

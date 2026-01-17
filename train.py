@@ -655,23 +655,38 @@ def main(cfg: DictConfig):
         trainer.sf_engine.ts_schedule = trainer.ts_schedule
         trainer.sf_engine.guidance_scale = trainer.guidance_scale
 
-    # Load pretrained checkpoint if provided
-    checkpoint_path = cfg.get('checkpoint', None)
-    if checkpoint_path is not None:
-        checkpoint_path = Path(checkpoint_path)
-        if checkpoint_path.exists():
-            print(f"\n   Loading pretrained checkpoint: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Load pretrained checkpoint (required)
+    # Check training.pretrained_checkpoint first, then fall back to checkpoint
+    checkpoint_path = cfg.training.get('pretrained_checkpoint', None) or cfg.get('checkpoint', None)
+    if checkpoint_path is None:
+        raise ValueError(
+            "checkpoint_path must be provided. "
+            "Set training.pretrained_checkpoint in config or use checkpoint=path/to/checkpoint.pt"
+        )
+    
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(
+            f"Checkpoint not found: {checkpoint_path}. "
+            "Please ensure the checkpoint file exists."
+        )
+    
+    print(f"\n   Loading pretrained checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
 
-            if "generator_state_dict" in checkpoint:
-                generator.load_state_dict(checkpoint["generator_state_dict"])
-                print(f"   Loaded generator weights from checkpoint")
+    if "generator_state_dict" in checkpoint:
+        generator.load_state_dict(checkpoint["generator_state_dict"])
+        print(f"   Loaded generator weights from checkpoint")
+    else:
+        raise KeyError(
+            f"Checkpoint {checkpoint_path} does not contain 'generator_state_dict'. "
+            "Please ensure this is a valid model checkpoint."
+        )
 
-            training_type = checkpoint.get("training_type", "unknown")
-            pretrain_step = checkpoint.get("step", 0)
-            print(f"   Checkpoint type: {training_type}, trained for {pretrain_step} steps")
-        else:
-            print(f"   Warning: Checkpoint {checkpoint_path} not found, starting from scratch")
+    training_type = checkpoint.get("training_type", "unknown")
+    pretrain_step = checkpoint.get("step", 0)
+    print(f"   Checkpoint type: {training_type}, trained for {pretrain_step} steps")
+    
 
     # Training plotter
     plotter = TrainingPlotter(save_dir=str(trainer.plots_dir))
