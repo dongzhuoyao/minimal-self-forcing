@@ -42,12 +42,39 @@ class SelfForcingEngine:
             num_frames_per_block: Number of frames per block
             context_noise: Noise level for cache update
         """
-        self.generator = generator
+        self.generator = generator  # fake_score (trainable)
         self.scheduler = scheduler
         self.device = device
         self.denoising_steps = denoising_steps
         self.num_frames_per_block = num_frames_per_block
         self.context_noise = context_noise
+        
+        # Create frozen copy of generator for real_score (teacher network)
+        # Matching original implementation: real_score is a separate frozen model
+        # In original impl, real_score is loaded from a separate model_name (e.g., "Wan2.1-T2V-1.3B")
+        # For simplified version, we use a deep copy of the generator
+        import copy
+        self.real_score = copy.deepcopy(generator)
+        for param in self.real_score.parameters():
+            param.requires_grad = False
+        self.real_score.eval()
+    
+    def update_real_score(self, ema_decay: float = 0.0):
+        """
+        Update the frozen real_score model with weights from generator.
+        This is used for self-distillation where teacher is updated periodically.
+        
+        Args:
+            ema_decay: EMA decay factor. If 0, copy weights directly. If > 0, use EMA update.
+        """
+        if ema_decay == 0.0:
+            # Direct copy (matching original implementation where real_score is separate)
+            self.real_score.load_state_dict(self.generator.state_dict())
+        else:
+            # EMA update for self-distillation
+            with torch.no_grad():
+                for real_param, gen_param in zip(self.real_score.parameters(), self.generator.parameters()):
+                    real_param.data.mul_(ema_decay).add_(gen_param.data, alpha=1 - ema_decay)
     
     def simulate_self_forcing(
         self,
@@ -341,42 +368,49 @@ class SelfForcingEngine:
             timestep.flatten(0, 1)
         ).unflatten(0, (batch_size, num_frames))
         
-        # Step 3: Compute KL gradient using generator as score network
-        # In full DMD, this would use separate real_score and fake_score networks
-        # For tutorial, we use generator itself (self-distillation)
-        # IMPORTANT: pred_fake needs gradients (student), pred_real should be frozen (teacher)
+        # Step 3: Compute KL gradient using separate fake_score and real_score networks
+        # Matching original DMD implementation:
+        # - fake_score: trainable generator (student)
+        # - real_score: frozen copy of generator (teacher)
         
         # Fake score: compute WITH gradients (student network)
-        # Ensure model is in train mode for fake_score to get proper gradients
         self.generator.train()
         pred_fake_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
         
         # Unconditional prediction (for classifier-free guidance)
+        # Matching original DMD implementation:
+        # - If real_guidance_scale and fake_guidance_scale are set: use them
+        # - Otherwise: real_guidance_scale = guidance_scale, fake_guidance_scale = 0.0
         guidance_scale = getattr(self, 'guidance_scale', 1.0)
-        if guidance_scale > 0:
+        
+        # Check if real_guidance_scale and fake_guidance_scale are explicitly set
+        has_separate_scales = hasattr(self, 'real_guidance_scale') and hasattr(self, 'fake_guidance_scale')
+        
+        if has_separate_scales:
+            fake_guidance_scale = self.fake_guidance_scale
+            real_guidance_scale = self.real_guidance_scale
+        else:
+            # Default: fake_guidance_scale = 0.0, real_guidance_scale = guidance_scale
+            fake_guidance_scale = 0.0
+            real_guidance_scale = guidance_scale
+        
+        # Fake score: compute WITH gradients (student network)
+        if fake_guidance_scale != 0.0:
             pred_fake_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
-            pred_fake = pred_fake_cond + guidance_scale * (pred_fake_cond - pred_fake_uncond)
+            pred_fake = pred_fake_cond + fake_guidance_scale * (pred_fake_cond - pred_fake_uncond)
         else:
             pred_fake = pred_fake_cond
         
         # Real score: compute WITHOUT gradients (teacher network, frozen)
-        # In full impl, this would be a separate real_score network
-        # For self-distillation: use eval mode to potentially get different outputs (due to dropout, batch norm, etc.)
-        # IMPORTANT: We need to detach pred_real to ensure gradients only flow through pred_fake
+        # Use frozen copy of generator (real_score)
         with torch.no_grad():
-            # Switch to eval mode for real_score to get deterministic/frozen behavior
-            # This helps differentiate from fake_score if model has dropout/batch norm
-            was_training = self.generator.training
-            self.generator.eval()
-            pred_real_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
-            if guidance_scale > 0:
-                pred_real_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
-                pred_real = pred_real_cond + guidance_scale * (pred_real_cond - pred_real_uncond)
+            pred_real_cond, _ = self.real_score(noisy_latent, timestep, conditional_dict)
+            
+            if real_guidance_scale != 0.0:
+                pred_real_uncond, _ = self.real_score(noisy_latent, timestep, unconditional_dict)
+                pred_real = pred_real_cond + real_guidance_scale * (pred_real_cond - pred_real_uncond)
             else:
                 pred_real = pred_real_cond
-            # Restore training mode
-            if was_training:
-                self.generator.train()
         
         # Explicitly detach pred_real to ensure it doesn't contribute to gradients
         pred_real = pred_real.detach()
@@ -397,8 +431,8 @@ class SelfForcingEngine:
         grad = torch.nan_to_num(grad)
         
         # Step 6: Compute DMD loss (DMD paper eq. 7)
-        # Loss = 0.5 * MSE(original_latent, original_latent - grad)
-        # IMPORTANT: original_latent must have gradients (from generator), grad is detached
+        # Matching original implementation: loss = 0.5 * MSE(original_latent, original_latent - grad)
+        # IMPORTANT: original_latent has gradients (from generator), grad is detached
         dmd_loss = 0.5 * F.mse_loss(
             original_latent.double(),
             (original_latent.double() - grad.double()).detach(),
