@@ -131,7 +131,7 @@ class SimplifiedTrainer:
             wandb.init(
                 project=cfg.wandb.get('project', 'self-forcing'),
                 entity=cfg.wandb.get('entity', None),
-                name=cfg.wandb.get('name', None) or f"self-forcing-{self.output_dir.name}",
+                name=cfg.wandb.get('name', None) or f"train-self-forcing-{self.output_dir.name}",
                 config=OmegaConf.to_container(cfg, resolve=True),
                 dir=str(self.output_dir)
             )

@@ -119,7 +119,7 @@ class PretrainingTrainer:
             wandb.init(
                 project=cfg.wandb.get('project', 'self-forcing-pretrain'),
                 entity=cfg.wandb.get('entity', None),
-                name=cfg.wandb.get('name', None) or f"pretrain-{self.log_dir.name}",
+                name=cfg.wandb.get('name', None) or f"train0-pretrain-{self.log_dir.name}",
                 config=OmegaConf.to_container(cfg, resolve=True),
                 dir=str(self.log_dir)
             )
