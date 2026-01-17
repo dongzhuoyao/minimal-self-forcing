@@ -594,11 +594,6 @@ def main(cfg: DictConfig):
     dataset_type = cfg.dataset.type.lower()
     print(f"\n1. Creating {dataset_type} dataset...")
 
-    if dataset_type != 'moving_mnist':
-        raise ValueError(
-            f"Dataset type '{dataset_type}' is not supported. "
-            f"Only 'moving_mnist' is available. Please set dataset.type='moving_mnist' in your config."
-        )
     
     dataset = MovingMNISTDataset(
         num_samples=num_samples,
@@ -678,22 +673,14 @@ def main(cfg: DictConfig):
     trainer.sf_engine.min_score_timestep = trainer.min_score_timestep
     trainer.sf_engine.guidance_scale = trainer.guidance_scale
 
-    # Load pretrained checkpoint (required)
-    # Check training.pretrained_checkpoint first, then fall back to checkpoint
-    checkpoint_path = cfg.training.pretrained_checkpoint if cfg.training.pretrained_checkpoint is not None else cfg.checkpoint
-    if checkpoint_path is None:
-        raise ValueError(
-            "checkpoint_path must be provided. "
-            "Set training.pretrained_checkpoint in config or use checkpoint=path/to/checkpoint.pt"
-        )
-    
+
+    checkpoint_path = cfg.training.pretrained_checkpoint 
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
         raise FileNotFoundError(
             f"Checkpoint not found: {checkpoint_path}. "
             "Please ensure the checkpoint file exists."
         )
-    
     print(f"\n   Loading pretrained checkpoint: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
@@ -841,18 +828,6 @@ def main(cfg: DictConfig):
 
     print("\n" + "=" * 70)
     print("Training completed!")
-    print("=" * 70)
-    print(f"\nAll outputs saved to: {output_dir}")
-    print(f"  - Checkpoints: {trainer.checkpoints_dir}")
-    print(f"  - Plots: {trainer.plots_dir}")
-    print(f"  - Samples: {trainer.samples_dir}")
-    if trainer.use_wandb:
-        print(f"  - W&B logs: {output_dir / 'wandb'}")
-    print("\nKey points:")
-    print("1. Self-Forcing simulates inference during training")
-    print("2. Videos are generated block-by-block autoregressively")
-    print("3. Loss is computed on the generated videos")
-    print("4. This bridges the train-test gap")
 
 
 if __name__ == "__main__":
