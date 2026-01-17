@@ -338,23 +338,25 @@ class SelfForcingEngine:
         # Step 3: Compute KL gradient using generator as score network
         # In full DMD, this would use separate real_score and fake_score networks
         # For tutorial, we use generator itself (self-distillation)
+        # IMPORTANT: pred_fake needs gradients (student), pred_real should be frozen (teacher)
+        
+        # Fake score: compute WITH gradients (student network)
+        pred_fake_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
+        
+        # Unconditional prediction (for classifier-free guidance)
+        guidance_scale = getattr(self, 'guidance_scale', 1.0)
+        if guidance_scale > 0:
+            pred_fake_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
+            pred_fake = pred_fake_cond + guidance_scale * (pred_fake_cond - pred_fake_uncond)
+        else:
+            pred_fake = pred_fake_cond
+        
+        # Real score: compute WITHOUT gradients (teacher network, frozen)
+        # In full impl, this would be a separate real_score network
         with torch.no_grad():
-            # Conditional prediction (fake score)
-            _, pred_fake_cond = self.generator(noisy_latent, timestep, conditional_dict)
-            
-            # Unconditional prediction (for classifier-free guidance)
-            guidance_scale = getattr(self, 'guidance_scale', 1.0)
+            pred_real_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
             if guidance_scale > 0:
-                _, pred_fake_uncond = self.generator(noisy_latent, timestep, unconditional_dict)
-                pred_fake = pred_fake_cond + guidance_scale * (pred_fake_cond - pred_fake_uncond)
-            else:
-                pred_fake = pred_fake_cond
-            
-            # Real score (using generator as teacher - simplified)
-            # In full impl, this would be a separate real_score network
-            _, pred_real_cond = self.generator(noisy_latent, timestep, conditional_dict)
-            if guidance_scale > 0:
-                _, pred_real_uncond = self.generator(noisy_latent, timestep, unconditional_dict)
+                pred_real_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
                 pred_real = pred_real_cond + guidance_scale * (pred_real_cond - pred_real_uncond)
             else:
                 pred_real = pred_real_cond
