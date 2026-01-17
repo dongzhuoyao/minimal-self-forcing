@@ -25,7 +25,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from moving_mnist import MovingMNISTDataset, TrainingPlotter, create_video_gif, save_video_grid
 from tiny_causal_wan import TinyCausalWanModel
-from dynamic_sf import SelfForcingEngine
+from dynamic_video_sf import SelfForcingEngine
 
 # Optional wandb import
 try:
@@ -157,7 +157,6 @@ class SimplifiedTrainer:
     ) -> Dict[str, float]:
         """
         Perform one training step with Self-Forcing.
-        
         Matches official implementation:
         1. Sample variable number of frames (21 to max_num_frames)
         2. Generate video block-by-block autoregressively
