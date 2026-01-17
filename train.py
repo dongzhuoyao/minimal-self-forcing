@@ -94,6 +94,7 @@ class SimplifiedTrainer:
         self.guidance_scale = cfg.training.get('guidance_scale', 1.0)
         self.timestep_shift = cfg.training.get('timestep_shift', 1.0)
         self.ts_schedule = cfg.training.get('ts_schedule', False)
+        self.ts_schedule_max = cfg.training.get('ts_schedule_max', False)
         self.min_score_timestep = cfg.training.get('min_score_timestep', 0)
         
         # Variable frame generation (matching official impl)
@@ -263,6 +264,14 @@ class SimplifiedTrainer:
             loss_str += f", GradNorm = {metrics['grad_norm']:.4f}"
         if "dmd_gradient_norm" in metrics:
             loss_str += f", DMDGradNorm = {metrics['dmd_gradient_norm']:.4f}"
+        if "pred_diff" in metrics:
+            loss_str += f", PredDiff = {metrics['pred_diff']:.6f}"
+        if "pred_fake_norm" in metrics:
+            loss_str += f", PredFakeNorm = {metrics['pred_fake_norm']:.4f}"
+        if "pred_real_norm" in metrics:
+            loss_str += f", PredRealNorm = {metrics['pred_real_norm']:.4f}"
+        if "original_latent_norm" in metrics:
+            loss_str += f", OrigLatentNorm = {metrics['original_latent_norm']:.4f}"
         if "num_frames" in metrics:
             loss_str += f", Frames = {metrics['num_frames']}"
         print(f"Step {self.step}: {loss_str}")
@@ -380,8 +389,22 @@ class SimplifiedTrainer:
                 if ground_truth_videos.shape[2:] != generated_videos.shape[2:]:
                     gt_resized = []
                     for gt_vid in ground_truth_videos:
+                        # gt_vid shape: [F, C, H, W]
+                        # Squeeze out any extra batch dimensions
+                        while gt_vid.dim() > 4:
+                            gt_vid = gt_vid.squeeze(0)
+                        
                         frames_resized = []
-                        for frame in gt_vid:
+                        # Iterate over frames: frame shape should be [C, H, W]
+                        for frame_idx in range(gt_vid.shape[0]):
+                            frame = gt_vid[frame_idx]  # [C, H, W]
+                            
+                            # Ensure frame is 3D [C, H, W]
+                            if frame.dim() != 3:
+                                # If somehow still has extra dims, squeeze them
+                                while frame.dim() > 3:
+                                    frame = frame.squeeze(0)
+                            
                             frame_np = frame.permute(1, 2, 0).cpu().numpy()
                             from PIL import Image
                             img = Image.fromarray((frame_np * 255).astype(np.uint8))

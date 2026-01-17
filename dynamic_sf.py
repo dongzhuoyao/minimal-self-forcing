@@ -347,6 +347,8 @@ class SelfForcingEngine:
         # IMPORTANT: pred_fake needs gradients (student), pred_real should be frozen (teacher)
         
         # Fake score: compute WITH gradients (student network)
+        # Ensure model is in train mode for fake_score to get proper gradients
+        self.generator.train()
         pred_fake_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
         
         # Unconditional prediction (for classifier-free guidance)
@@ -359,17 +361,33 @@ class SelfForcingEngine:
         
         # Real score: compute WITHOUT gradients (teacher network, frozen)
         # In full impl, this would be a separate real_score network
+        # For self-distillation: use eval mode to potentially get different outputs (due to dropout, batch norm, etc.)
+        # IMPORTANT: We need to detach pred_real to ensure gradients only flow through pred_fake
         with torch.no_grad():
+            # Switch to eval mode for real_score to get deterministic/frozen behavior
+            # This helps differentiate from fake_score if model has dropout/batch norm
+            was_training = self.generator.training
+            self.generator.eval()
             pred_real_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
             if guidance_scale > 0:
                 pred_real_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
                 pred_real = pred_real_cond + guidance_scale * (pred_real_cond - pred_real_uncond)
             else:
                 pred_real = pred_real_cond
+            # Restore training mode
+            if was_training:
+                self.generator.train()
+        
+        # Explicitly detach pred_real to ensure it doesn't contribute to gradients
+        pred_real = pred_real.detach()
         
         # Step 4: Compute DMD gradient (DMD paper eq. 7)
         # grad = pred_fake - pred_real
+        # pred_fake has gradients, pred_real is detached, so grad has gradients from pred_fake
         grad = (pred_fake - pred_real)
+        
+        # Debug: Check if pred_fake and pred_real are identical (which would make grad=0)
+        pred_diff = torch.mean(torch.abs(pred_fake - pred_real)).item()
         
         # Step 5: Normalize gradient (DMD paper eq. 8)
         p_real = (original_latent - pred_real)
@@ -380,6 +398,7 @@ class SelfForcingEngine:
         
         # Step 6: Compute DMD loss (DMD paper eq. 7)
         # Loss = 0.5 * MSE(original_latent, original_latent - grad)
+        # IMPORTANT: original_latent must have gradients (from generator), grad is detached
         dmd_loss = 0.5 * F.mse_loss(
             original_latent.double(),
             (original_latent.double() - grad.double()).detach(),
@@ -389,7 +408,11 @@ class SelfForcingEngine:
         # Log dict for metrics
         log_dict = {
             "dmd_gradient_norm": torch.mean(torch.abs(grad)).detach(),
-            "timestep": timestep.float().mean().detach()
+            "timestep": timestep.float().mean().detach(),
+            "pred_diff": pred_diff,  # Debug: difference between pred_fake and pred_real
+            "pred_fake_norm": torch.mean(torch.abs(pred_fake)).detach(),
+            "pred_real_norm": torch.mean(torch.abs(pred_real)).detach(),
+            "original_latent_norm": torch.mean(torch.abs(original_latent)).detach(),
         }
         
         return dmd_loss, log_dict
