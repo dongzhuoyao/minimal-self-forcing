@@ -89,16 +89,16 @@ class PretrainingTrainer:
 
         # Training config
         self.num_frames_per_block = cfg.training.num_frames_per_block
-        self.num_train_timestep = cfg.training.get('num_train_timestep', 1000)
-        self.min_timestep = cfg.training.get('min_timestep', None)
-        self.max_timestep = cfg.training.get('max_timestep', None)
+        self.num_train_timestep = cfg.training.num_train_timestep
+        self.min_timestep = cfg.training.min_timestep
+        self.max_timestep = cfg.training.max_timestep
         # Use min_step/max_step if not explicitly set (matching official impl)
         if self.min_timestep is None:
             self.min_timestep = int(0.02 * self.num_train_timestep)  # Default: 20
         if self.max_timestep is None:
             self.max_timestep = int(0.98 * self.num_train_timestep)  # Default: 980
         self.gradient_clip_norm = cfg.training.gradient_clip_norm
-        self.prediction_type = cfg.training.get('prediction_type', 'flow')  # Default to flow matching
+        self.prediction_type = cfg.training.prediction_type
 
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -117,9 +117,9 @@ class PretrainingTrainer:
         # Initialize wandb
         if self.use_wandb:
             wandb.init(
-                project=cfg.wandb.get('project', 'self-forcing-pretrain'),
-                entity=cfg.wandb.get('entity', None),
-                name=cfg.wandb.get('name', None) or f"train0-pretrain-{self.log_dir.name}",
+                project=cfg.wandb.project,
+                entity=cfg.wandb.entity,
+                name=cfg.wandb.name or f"train0-pretrain-{self.log_dir.name}",
                 config=OmegaConf.to_container(cfg, resolve=True),
                 dir=str(self.log_dir)
             )
@@ -840,9 +840,9 @@ def main(cfg: DictConfig):
 
     # Create scheduler with Flow Matching support
     scheduler = SimpleScheduler(
-        num_train_timesteps=cfg.training.get('num_train_timestep', 1000),
-        sigma_max=cfg.training.get('sigma_max', 1.0),
-        sigma_min=cfg.training.get('sigma_min', 0.003/1.002)
+        num_train_timesteps=cfg.training.num_train_timestep,
+        sigma_max=cfg.training.sigma_max,
+        sigma_min=cfg.training.sigma_min
     )
 
     # Create trainer

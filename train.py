@@ -88,18 +88,18 @@ class SimplifiedTrainer:
         self.use_dmd_loss = cfg.training.use_dmd_loss
         
         # DMD-specific configs
-        self.num_train_timestep = cfg.training.get('num_train_timestep', 1000)
+        self.num_train_timestep = cfg.training.num_train_timestep
         self.min_step = int(0.02 * self.num_train_timestep)
         self.max_step = int(0.98 * self.num_train_timestep)
-        self.guidance_scale = cfg.training.get('guidance_scale', 1.0)
-        self.timestep_shift = cfg.training.get('timestep_shift', 1.0)
-        self.ts_schedule = cfg.training.get('ts_schedule', False)
-        self.ts_schedule_max = cfg.training.get('ts_schedule_max', False)
-        self.min_score_timestep = cfg.training.get('min_score_timestep', 0)
+        self.guidance_scale = cfg.training.guidance_scale
+        self.timestep_shift = cfg.training.timestep_shift
+        self.ts_schedule = cfg.training.ts_schedule
+        self.ts_schedule_max = cfg.training.ts_schedule_max
+        self.min_score_timestep = cfg.training.min_score_timestep
         
         # Variable frame generation (matching official impl)
-        self.min_num_frames = cfg.training.get('min_num_frames', 21)
-        self.max_num_frames = cfg.training.get('max_num_frames', self.training_num_frames)
+        self.min_num_frames = cfg.training.min_num_frames
+        self.max_num_frames = cfg.training.max_num_frames if cfg.training.max_num_frames is not None else self.training_num_frames
         assert self.min_num_frames % self.num_frames_per_block == 0
         assert self.max_num_frames % self.num_frames_per_block == 0
 
@@ -129,9 +129,9 @@ class SimplifiedTrainer:
         # Initialize wandb if requested
         if self.use_wandb:
             wandb.init(
-                project=cfg.wandb.get('project', 'self-forcing'),
-                entity=cfg.wandb.get('entity', None),
-                name=cfg.wandb.get('name', None) or f"train-self-forcing-{self.output_dir.name}",
+                project=cfg.wandb.project,
+                entity=cfg.wandb.entity,
+                name=cfg.wandb.name or f"train-self-forcing-{self.output_dir.name}",
                 config=OmegaConf.to_container(cfg, resolve=True),
                 dir=str(self.output_dir)
             )
@@ -682,7 +682,7 @@ def main(cfg: DictConfig):
 
     # Load pretrained checkpoint (required)
     # Check training.pretrained_checkpoint first, then fall back to checkpoint
-    checkpoint_path = cfg.training.get('pretrained_checkpoint', None) or cfg.get('checkpoint', None)
+    checkpoint_path = cfg.training.pretrained_checkpoint if cfg.training.pretrained_checkpoint is not None else cfg.checkpoint
     if checkpoint_path is None:
         raise ValueError(
             "checkpoint_path must be provided. "

@@ -19,7 +19,7 @@ training:
   pretrained_checkpoint: ./outputs/2026-01-17/10-46-03/checkpoint_step_039000.pt    # Pretrained checkpoint to load
   num_steps: 100000              # Number of training steps
   batch_size: 4               # Batch size
-  lr: 0.0001                   # Learning rate (1e-4)
+  lr: 1e-3                   # Learning rate (1e-3)
   weight_decay: 0.01           # Weight decay for optimizer
   gradient_clip_norm: 1.0      # Gradient clipping max norm
 
@@ -34,6 +34,16 @@ training:
   # Note: The model predicts flow, but current DMD implementation uses x0 predictions
   # Original impl uses denoising_loss_type: flow for flow-based DMD loss
   denoising_loss_type: "flow"  # Denoising loss type: "flow" (Flow Matching), "x0", "noise", or "v"
+
+  # DMD-specific configs (optional, with defaults)
+  num_train_timestep: 1000      # Number of training timesteps
+  guidance_scale: 1.0            # Guidance scale for generation
+  timestep_shift: 1.0            # Timestep shift factor
+  ts_schedule: false             # Use timestep schedule
+  ts_schedule_max: false         # Maximum timestep schedule
+  min_score_timestep: 0          # Minimum score timestep
+  min_num_frames: 21             # Minimum number of frames
+  max_num_frames: null           # Maximum number of frames (null = use training_num_frames)
 
   # Training control
   save_interval: 1000         # Save checkpoint every N steps
