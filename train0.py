@@ -131,6 +131,11 @@ class PretrainingTrainer:
                 "device": self.device,
                 "training_type": "pretraining"
             })
+            # Log model parameter count as a metric for better visibility
+            wandb.log({
+                "model/total_parameters": total_params,
+                "model/trainable_parameters": trainable_params
+            }, step=0)
             print(f"Initialized wandb: project={cfg.wandb.project}")
         elif cfg.wandb.enabled and not WANDB_AVAILABLE:
             print("Warning: wandb requested but not installed. Install with: pip install wandb")
@@ -258,7 +263,10 @@ class PretrainingTrainer:
         print(f"Step {self.step}: Loss = {metrics['loss']:.8f}")
 
         if self.use_wandb:
-            wandb.log(metrics, step=self.step)
+            # Add learning rate to metrics
+            current_lr = self.optimizer.param_groups[0]['lr']
+            metrics_with_lr = {**metrics, 'learning_rate': current_lr}
+            wandb.log(metrics_with_lr, step=self.step)
 
     def _save_checkpoint(self, final: bool = False):
         """Save model checkpoint compatible with train.py."""
