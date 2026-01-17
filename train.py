@@ -458,6 +458,18 @@ class SimplifiedTrainer:
                         ),
                     }, step=self.step)
 
+                # Log ground truth videos
+                if gt_gif_paths:
+                    for i, gt_gif_path in enumerate(gt_gif_paths):
+                        caption = f"Digit {digit_labels[i]} (GT)" if digit_labels and digit_labels[i] is not None else "Ground Truth"
+                        wandb.log({
+                            f"samples/ground_truth_video_{i}": wandb.Video(
+                                str(gt_gif_path),
+                                format="gif",
+                                caption=caption
+                            ),
+                        }, step=self.step)
+
         self.generator.train()
 
     def _generate_full_video(
@@ -664,6 +676,20 @@ def main(cfg: DictConfig):
     # Training plotter
     plotter = TrainingPlotter(save_dir=str(trainer.plots_dir))
 
+    # Get ground truth videos for visualization (collect upfront for consistency)
+    num_viz_samples = cfg.generation.num_viz_samples
+    ground_truth_videos_for_viz = None
+    if len(dataset) > 0:
+        gt_videos_list = []
+        for i in range(min(num_viz_samples, len(dataset))):
+            sample = dataset[i]
+            video = sample["video"]  # Shape: [F, C, H, W]
+            # Add batch dimension: [1, F, C, H, W]
+            gt_videos_list.append(video.unsqueeze(0))
+        # Stack to [num_viz_samples, F, C, H, W]
+        if gt_videos_list:
+            ground_truth_videos_for_viz = torch.stack(gt_videos_list, dim=0)
+
     # Training loop
     print("\n4. Starting training...")
     print("-" * 70)
@@ -703,10 +729,12 @@ def main(cfg: DictConfig):
             num_viz_samples = cfg.generation.num_viz_samples
             viz_digits = list(cfg.viz_digits) if cfg.viz_digits else list(range(min(4, num_viz_samples)))
 
+            # Use pre-collected ground truth videos, or fall back to batch videos
             ground_truth_videos = None
-            if "video" in batch:
+            if ground_truth_videos_for_viz is not None:
+                ground_truth_videos = ground_truth_videos_for_viz.to(trainer.device)
+            elif "video" in batch:
                 batch_videos = batch["video"]
-
                 if isinstance(batch_videos, list):
                     batch_videos = [v.to(trainer.device) for v in batch_videos[:num_viz_samples]]
                     if batch_videos:
@@ -741,27 +769,31 @@ def main(cfg: DictConfig):
 
     # Generate final sample videos
     print("\nGenerating final sample videos...")
-    ground_truth_videos = None
-    try:
-        sample_batch = next(iter(dataloader))
-        if "video" in sample_batch:
-            batch_videos = sample_batch["video"]
-            if isinstance(batch_videos, list):
-                batch_videos = [v.to(trainer.device) for v in batch_videos[:4]]
-                if batch_videos:
-                    ground_truth_videos = torch.stack(batch_videos)
-            elif isinstance(batch_videos, torch.Tensor):
-                ground_truth_videos = batch_videos[:4].to(trainer.device)
-                if len(ground_truth_videos.shape) == 4:
-                    ground_truth_videos = ground_truth_videos.unsqueeze(0)
-    except:
-        pass
+    # Use pre-collected ground truth videos, or fall back to batch videos
+    final_ground_truth_videos = None
+    if ground_truth_videos_for_viz is not None:
+        final_ground_truth_videos = ground_truth_videos_for_viz[:4].to(trainer.device)
+    else:
+        try:
+            sample_batch = next(iter(dataloader))
+            if "video" in sample_batch:
+                batch_videos = sample_batch["video"]
+                if isinstance(batch_videos, list):
+                    batch_videos = [v.to(trainer.device) for v in batch_videos[:4]]
+                    if batch_videos:
+                        final_ground_truth_videos = torch.stack(batch_videos)
+                elif isinstance(batch_videos, torch.Tensor):
+                    final_ground_truth_videos = batch_videos[:4].to(trainer.device)
+                    if len(final_ground_truth_videos.shape) == 4:
+                        final_ground_truth_videos = final_ground_truth_videos.unsqueeze(0)
+        except:
+            pass
 
     trainer.generate_sample_videos(
         num_samples=4,
         num_frames=9,
         num_frames_per_block=3,
-        ground_truth_videos=ground_truth_videos,
+        ground_truth_videos=final_ground_truth_videos,
         gif_fps=cfg.generation.gif_fps
     )
 

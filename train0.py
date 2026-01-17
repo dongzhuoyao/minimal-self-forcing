@@ -393,14 +393,58 @@ class PretrainingTrainer:
             generated_videos = (generated_videos + 1.0) / 2.0
             generated_videos = generated_videos.clamp(0, 1)
 
-            # Save GIFs
+            # Process ground truth videos if provided
+            gt_videos_list = None
+            if ground_truth_videos is not None:
+                if ground_truth_videos.device != self.device:
+                    ground_truth_videos = ground_truth_videos.to(self.device)
+
+                # Normalize ground truth videos from [-1, 1] to [0, 1]
+                if ground_truth_videos.min() < 0:
+                    ground_truth_videos = (ground_truth_videos + 1.0) / 2.0
+                ground_truth_videos = ground_truth_videos.clamp(0, 1)
+
+                # Resize if needed
+                if ground_truth_videos.shape[2:] != generated_videos.shape[2:]:
+                    gt_resized = []
+                    for gt_vid in ground_truth_videos:
+                        frames_resized = []
+                        for frame in gt_vid:
+                            frame_np = frame.permute(1, 2, 0).cpu().numpy()
+                            from PIL import Image
+                            img = Image.fromarray((frame_np * 255).astype(np.uint8))
+                            target_size = (generated_videos.shape[-1], generated_videos.shape[-2])
+                            img_resized = img.resize(target_size, Image.Resampling.LANCZOS)
+                            frame_resized = torch.from_numpy(np.array(img_resized)).float() / 255.0
+                            frame_resized = frame_resized.permute(2, 0, 1)
+                            frames_resized.append(frame_resized)
+                        gt_resized.append(torch.stack(frames_resized))
+                    ground_truth_videos = torch.stack(gt_resized).to(self.device)
+
+                # Truncate to match num_frames
+                if ground_truth_videos.shape[1] != num_frames:
+                    ground_truth_videos = ground_truth_videos[:, :num_frames]
+
+                # Limit to num_samples
+                ground_truth_videos = ground_truth_videos[:num_samples]
+                gt_videos_list = [gt_video for gt_video in ground_truth_videos]
+
+            # Save GIFs for generated videos
             videos_list = []
             for i, video_tensor in enumerate(generated_videos):
                 gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                 create_video_gif(video_tensor, str(gif_path), fps=gif_fps)
                 videos_list.append(video_tensor)
 
-            # Save grid
+            # Save GIFs for ground truth videos
+            gt_gif_paths = []
+            if gt_videos_list is not None:
+                for i, gt_video in enumerate(gt_videos_list):
+                    gt_gif_path = self.samples_dir / f"step_{self.step:06d}_gt_{i:02d}.gif"
+                    create_video_gif(gt_video, str(gt_gif_path), fps=gif_fps)
+                    gt_gif_paths.append(gt_gif_path)
+
+            # Save grid for generated videos
             grid_path = self.samples_dir / f"step_{self.step:06d}_grid.png"
             # Format labels for visualization: "Digit 0", "Digit 1", etc.
             if digit_labels:
@@ -408,6 +452,19 @@ class PretrainingTrainer:
             else:
                 labels_for_viz = [""] * num_samples
             save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
+
+            # Save comparison grid (generated vs ground truth)
+            comparison_grid_path = None
+            if gt_videos_list is not None:
+                comparison_grid_path = self.samples_dir / f"step_{self.step:06d}_comparison_grid.png"
+                comparison_videos = []
+                comparison_prompts = []
+                for gen_vid, gt_vid, label in zip(videos_list, gt_videos_list, labels_for_viz):
+                    comparison_videos.append(gen_vid)
+                    comparison_videos.append(gt_vid)
+                    comparison_prompts.append(f"{label} (Generated)")
+                    comparison_prompts.append(f"{label} (Ground Truth)")
+                save_video_grid(comparison_videos, str(comparison_grid_path), prompts=comparison_prompts, ncols=2)
 
             print(f"  Saved sample videos to {self.samples_dir}")
 
@@ -417,16 +474,33 @@ class PretrainingTrainer:
                     "samples/grid": wandb.Image(str(grid_path)),
                 }, step=self.step)
 
+                if comparison_grid_path is not None:
+                    wandb.log({
+                        "samples/comparison_grid": wandb.Image(str(comparison_grid_path)),
+                    }, step=self.step)
+
                 for i, video_tensor in enumerate(videos_list):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                     caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
                     wandb.log({
-                        f"samples/video_{i}": wandb.Video(
+                        f"samples/generated_video_{i}": wandb.Video(
                             str(gif_path),
                             format="gif",
                             caption=caption
                         ),
                     }, step=self.step)
+
+                # Log ground truth videos
+                if gt_gif_paths:
+                    for i, gt_gif_path in enumerate(gt_gif_paths):
+                        caption = f"Digit {digit_labels[i]} (GT)" if digit_labels and digit_labels[i] is not None else "Ground Truth"
+                        wandb.log({
+                            f"samples/ground_truth_video_{i}": wandb.Video(
+                                str(gt_gif_path),
+                                format="gif",
+                                caption=caption
+                            ),
+                        }, step=self.step)
 
         self.generator.train()
 
@@ -768,6 +842,20 @@ def main(cfg: DictConfig):
     # Training plotter
     plotter = TrainingPlotter(save_dir=str(Path(log_dir) / "plots"))
 
+    # Get ground truth videos for visualization
+    num_viz_samples = cfg.generation.num_viz_samples
+    ground_truth_videos_for_viz = None
+    if len(dataset) > 0:
+        gt_videos_list = []
+        for i in range(min(num_viz_samples, len(dataset))):
+            sample = dataset[i]
+            video = sample["video"]  # Shape: [F, C, H, W]
+            # Add batch dimension: [1, F, C, H, W]
+            gt_videos_list.append(video.unsqueeze(0))
+        # Stack to [num_viz_samples, F, C, H, W]
+        if gt_videos_list:
+            ground_truth_videos_for_viz = torch.stack(gt_videos_list, dim=0)
+
     # Training loop
     print("\n4. Starting pretraining...")
     print("-" * 70)
@@ -810,6 +898,7 @@ def main(cfg: DictConfig):
                 num_samples=num_viz_samples,
                 num_frames=video_frames,
                 digits=viz_digits,
+                ground_truth_videos=ground_truth_videos_for_viz,
                 gif_fps=cfg.generation.gif_fps
             )
 
@@ -832,6 +921,7 @@ def main(cfg: DictConfig):
     trainer.generate_sample_videos(
         num_samples=4,
         num_frames=video_frames,
+        ground_truth_videos=ground_truth_videos_for_viz[:4] if ground_truth_videos_for_viz is not None else None,
         gif_fps=cfg.generation.gif_fps
     )
 
