@@ -131,7 +131,7 @@ class SimplifiedTrainer:
             wandb.init(
                 project=cfg.wandb.project,
                 entity=cfg.wandb.entity,
-                name=cfg.wandb.name or f"train-self-forcing-{self.output_dir.name}",
+                name=cfg.wandb.name or f"dmd2-{self.output_dir.name}",
                 config=OmegaConf.to_container(cfg, resolve=True),
                 dir=str(self.output_dir)
             )
@@ -140,9 +140,7 @@ class SimplifiedTrainer:
             wandb.config.update({
                 "total_parameters": total_params,
                 "trainable_parameters": trainable_params,
-                "device": self.device,
-                "output_dir": str(self.output_dir),
-                "training_type": "self-forcing"
+                "training_type": "dmd2"
             })
             # Log model parameter count as a metric for better visibility
             wandb.log({
@@ -289,7 +287,7 @@ class SimplifiedTrainer:
             "generator_state_dict": self.generator.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "metrics_history": self.metrics_history,
-            "training_type": "self-forcing",
+            "training_type": "dmd2",
             "config": OmegaConf.to_container(self.cfg, resolve=True)
         }
 
