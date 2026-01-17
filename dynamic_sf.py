@@ -292,31 +292,37 @@ class SelfForcingEngine:
         # Step 1: Sample timestep for DMD (with optional scheduling)
         with torch.no_grad():
             ts_schedule = getattr(self, 'ts_schedule', False)
+            ts_schedule_max = getattr(self, 'ts_schedule_max', False)
+            num_train_timestep = getattr(self, 'num_train_timestep', 1000)
             min_step = getattr(self, 'min_step', 20)
             max_step = getattr(self, 'max_step', 980)
-            
-            if ts_schedule and denoised_timestep_to is not None and denoised_timestep_from is not None:
-                min_timestep = denoised_timestep_to
-                max_timestep = denoised_timestep_from
-            else:
-                min_timestep = min_step
-                max_timestep = max_step
-            
-            # Sample uniform timestep
-            min_step = getattr(self, 'min_step', 20)
-            max_step = getattr(self, 'max_step', 980)
+            min_score_timestep = getattr(self, 'min_score_timestep', 0)
             timestep_shift = getattr(self, 'timestep_shift', 1.0)
             
+            # Determine min_timestep: use denoised_timestep_to if ts_schedule is enabled, else min_score_timestep
+            if ts_schedule and denoised_timestep_to is not None:
+                min_timestep = denoised_timestep_to
+            else:
+                min_timestep = min_score_timestep
+            
+            # Determine max_timestep: use denoised_timestep_from if ts_schedule_max is enabled, else num_train_timestep
+            if ts_schedule_max and denoised_timestep_from is not None:
+                max_timestep = denoised_timestep_from
+            else:
+                max_timestep = num_train_timestep
+            
+            # Sample uniform timestep
             timestep_value = torch.randint(
                 min_timestep, max_timestep + 1, (1,), device=device
             ).item()
             
-            # Apply timestep shift if needed
+            # Apply timestep shift if needed (matching original DMD implementation)
             if timestep_shift > 1.0:
                 timestep_value = int(
                     timestep_shift * (timestep_value / 1000.0) / 
                     (1 + (timestep_shift - 1) * (timestep_value / 1000.0)) * 1000
                 )
+                # Clamp to [min_step, max_step] after shift
                 timestep_value = max(min_step, min(max_step, timestep_value))
         
         # Create timestep tensor with shape [B, F] matching the video shape

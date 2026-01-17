@@ -653,6 +653,8 @@ def main(cfg: DictConfig):
     trainer.sf_engine.max_step = trainer.max_step
     trainer.sf_engine.timestep_shift = trainer.timestep_shift
     trainer.sf_engine.ts_schedule = trainer.ts_schedule
+    trainer.sf_engine.ts_schedule_max = trainer.ts_schedule_max
+    trainer.sf_engine.min_score_timestep = trainer.min_score_timestep
     trainer.sf_engine.guidance_scale = trainer.guidance_scale
 
     # Load pretrained checkpoint (required)

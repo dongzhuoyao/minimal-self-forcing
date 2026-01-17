@@ -18,7 +18,7 @@ hydra:
 training:
   pretrained_checkpoint: ./outputs/2026-01-17/10-46-03/checkpoint_step_039000.pt    # Pretrained checkpoint to load
   num_steps: 100000              # Number of training steps
-  batch_size: 4               # Batch size
+  batch_size: 2               # Batch size
   lr: 0.0001                   # Learning rate (1e-4)
   weight_decay: 0.01           # Weight decay for optimizer
   gradient_clip_norm: 1.0      # Gradient clipping max norm
