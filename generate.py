@@ -420,7 +420,7 @@ def main():
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     
-    checkpoint_data = torch.load(checkpoint_path, map_location=device)
+    checkpoint_data = torch.load(checkpoint_path, map_location=device, weights_only=True)
     
     # Handle different checkpoint formats
     if "generator_state_dict" in checkpoint_data:

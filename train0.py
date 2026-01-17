@@ -296,7 +296,7 @@ class PretrainingTrainer:
 
     def load_checkpoint(self, checkpoint_path: str):
         """Load model checkpoint."""
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         self.generator.load_state_dict(checkpoint["generator_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.step = checkpoint.get("step", 0)

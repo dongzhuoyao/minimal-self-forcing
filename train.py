@@ -697,7 +697,7 @@ def main(cfg: DictConfig):
         )
     
     print(f"\n   Loading pretrained checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
     if "generator_state_dict" in checkpoint:
         generator.load_state_dict(checkpoint["generator_state_dict"])
