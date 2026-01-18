@@ -253,7 +253,8 @@ class SelfForcingEngine:
         conditional_dict: Optional[Dict[str, torch.Tensor]] = None,
         unconditional_dict: Optional[Dict[str, torch.Tensor]] = None,
         denoised_timestep_from: Optional[int] = None,
-        denoised_timestep_to: Optional[int] = None
+        denoised_timestep_to: Optional[int] = None,
+        compute_generator_gradient: bool = True
     ):
         """
         Compute Self-Forcing loss.
@@ -276,7 +277,8 @@ class SelfForcingEngine:
             conditional_dict, 
             unconditional_dict,
             denoised_timestep_from,
-            denoised_timestep_to
+            denoised_timestep_to,
+            compute_generator_gradient=compute_generator_gradient
         )
     
     def compute_dmd_loss(
@@ -286,7 +288,8 @@ class SelfForcingEngine:
         unconditional_dict: Optional[Dict[str, torch.Tensor]] = None,
         denoised_timestep_from: Optional[int] = None,
         denoised_timestep_to: Optional[int] = None,
-        embed_key: str = "prompt_embeds"
+        embed_key: str = "prompt_embeds",
+        compute_generator_gradient: bool = True
     ):
         """
         Compute DMD (Distribution Matching Distillation) loss.
@@ -315,6 +318,8 @@ class SelfForcingEngine:
         Returns:
             DMD loss tensor and log dict
         """
+        if not compute_generator_gradient:
+            generated_video = generated_video.detach()
         original_latent = generated_video
         batch_size, num_frames = generated_video.shape[:2]
         device = generated_video.device
@@ -387,7 +392,11 @@ class SelfForcingEngine:
         
         # Fake score: compute WITH gradients (student network)
         self.generator.train()
-        pred_fake_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
+        if compute_generator_gradient:
+            pred_fake_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
+        else:
+            with torch.no_grad():
+                pred_fake_cond, _ = self.generator(noisy_latent, timestep, conditional_dict)
         
         # Unconditional prediction (for classifier-free guidance)
         # Matching original DMD implementation:
@@ -408,7 +417,11 @@ class SelfForcingEngine:
         
         # Fake score: compute WITH gradients (student network)
         if fake_guidance_scale != 0.0:
-            pred_fake_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
+            if compute_generator_gradient:
+                pred_fake_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
+            else:
+                with torch.no_grad():
+                    pred_fake_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
             pred_fake = pred_fake_cond + fake_guidance_scale * (pred_fake_cond - pred_fake_uncond)
         else:
             pred_fake = pred_fake_cond
@@ -448,6 +461,11 @@ class SelfForcingEngine:
         
         # Debug: Check if pred_fake and pred_real are identical (which would make grad=0)
         pred_diff = torch.mean(torch.abs(pred_fake_x0 - pred_real_x0)).item()
+        guidance_loss = F.mse_loss(
+            pred_fake_x0.detach(),
+            pred_real_x0.detach(),
+            reduction="mean"
+        )
         
         # Step 6: Normalize gradient (DMD paper eq. 8)
         normalizer = torch.abs(p_real).mean(dim=[1, 2, 3, 4], keepdim=True)
@@ -472,6 +490,7 @@ class SelfForcingEngine:
             "pred_fake_norm": torch.mean(torch.abs(pred_fake_x0)).detach(),
             "pred_real_norm": torch.mean(torch.abs(pred_real_x0)).detach(),
             "original_latent_norm": torch.mean(torch.abs(original_latent)).detach(),
+            "guidance_loss": guidance_loss.detach(),
         }
         
         return dmd_loss, log_dict

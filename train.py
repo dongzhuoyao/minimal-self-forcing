@@ -85,6 +85,7 @@ class SimplifiedTrainer:
         self.video_height = cfg.training.video_height
         self.video_width = cfg.training.video_width
         self.gradient_clip_norm = cfg.training.gradient_clip_norm
+        self.dfake_gen_update_ratio = int(getattr(cfg.training, "dfake_gen_update_ratio", 1))
         
         # DMD-specific configs
         self.num_train_timestep = cfg.training.num_train_timestep
@@ -119,6 +120,9 @@ class SimplifiedTrainer:
             "dmd_gradient_norm": [],
             "step": []
         }
+        self.running_generator_loss_sum = 0.0
+        self.running_guidance_loss_sum = 0.0
+        self.generator_update_count = 0
         
         # Moving average loss tracker (exponential moving average)
         self.average_loss = None
@@ -180,37 +184,47 @@ class SimplifiedTrainer:
             device=self.device
         )
 
+        compute_generator_gradient = (self.step % self.dfake_gen_update_ratio == 0)
+
         # Step 3: Simulate Self-Forcing inference during training
         # This generates video block-by-block with KV cache simulation
         # Use empty conditional dict (model will create dummy embeddings if needed)
         conditional_dict = {}
-        generated_video, denoised_timestep_from, denoised_timestep_to = self.sf_engine.simulate_self_forcing(
-            noise, conditional_dict, return_timesteps=True
-        )
+        if compute_generator_gradient:
+            generated_video, denoised_timestep_from, denoised_timestep_to = self.sf_engine.simulate_self_forcing(
+                noise, conditional_dict, return_timesteps=True
+            )
+        else:
+            with torch.no_grad():
+                generated_video, denoised_timestep_from, denoised_timestep_to = self.sf_engine.simulate_self_forcing(
+                    noise, conditional_dict, return_timesteps=True
+                )
 
         # Step 4: Compute Self-Forcing loss (data-free, uses DMD)
         # Use empty unconditional dict (model will create dummy embeddings if needed)
         unconditional_dict = {}
-        
         loss, log_dict = self.sf_engine.compute_self_forcing_loss(
             generated_video,
             conditional_dict=conditional_dict,
             unconditional_dict=unconditional_dict,
             denoised_timestep_from=denoised_timestep_from,
-            denoised_timestep_to=denoised_timestep_to
+            denoised_timestep_to=denoised_timestep_to,
+            compute_generator_gradient=compute_generator_gradient
         )
 
-        # Step 5: Backward pass
-        loss.backward()
+        grad_norm = None
+        if compute_generator_gradient:
+            # Step 5: Backward pass
+            loss.backward()
 
-        # Step 6: Gradient clipping
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.generator.parameters(), 
-            max_norm=self.gradient_clip_norm
-        )
+            # Step 6: Gradient clipping
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.generator.parameters(), 
+                max_norm=self.gradient_clip_norm
+            )
 
-        # Step 7: Optimizer step
-        self.optimizer.step()
+            # Step 7: Optimizer step
+            self.optimizer.step()
 
         # Step 8: Update metrics
         loss_value = loss.item()
@@ -220,14 +234,29 @@ class SimplifiedTrainer:
             self.average_loss = loss_value
         else:
             self.average_loss = self.smoothing_decay * self.average_loss + (1 - self.smoothing_decay) * loss_value
+
+        if compute_generator_gradient:
+            self.running_generator_loss_sum += loss_value
+            self.generator_update_count += 1
+        if log_dict and "guidance_loss" in log_dict:
+            self.running_guidance_loss_sum += float(
+                log_dict["guidance_loss"].item() if torch.is_tensor(log_dict["guidance_loss"]) else log_dict["guidance_loss"]
+            )
+
+        avg_generator_loss = self.running_generator_loss_sum / max(1, self.generator_update_count)
+        avg_guidance_loss = self.running_guidance_loss_sum / max(1, self.step + 1)
         
         metrics = {
             "loss": loss_value,
             "average_loss": self.average_loss,
-            "grad_norm": grad_norm.item(),
+            "generator_update": int(compute_generator_gradient),
+            "avg_generator_loss": avg_generator_loss,
+            "avg_guidance_loss": avg_guidance_loss,
             "num_frames": num_generated_frames,
             "step": self.step
         }
+        if compute_generator_gradient and grad_norm is not None:
+            metrics["grad_norm"] = grad_norm.item()
         
         # Add DMD-specific metrics
         if log_dict:
@@ -252,6 +281,13 @@ class SimplifiedTrainer:
         loss_str = f"Loss = {metrics['loss']:.8f}"
         if "average_loss" in metrics:
             loss_str += f", AvgLoss = {metrics['average_loss']:.8f}"
+        if "generator_update" in metrics:
+            if metrics["generator_update"]:
+                loss_str += f", AvgGenLoss = {metrics.get('avg_generator_loss', metrics['loss']):.8f}"
+            else:
+                loss_str += f", AvgGenLoss = {metrics.get('avg_generator_loss', metrics['loss']):.8f}"
+        if "guidance_loss" in metrics:
+            loss_str += f", AvgGuidanceLoss = {metrics.get('avg_guidance_loss', metrics['guidance_loss']):.8f}"
         if "num_frames" in metrics:
             loss_str += f", Frames = {metrics['num_frames']}"
         print(f"Step {self.step}: {loss_str}")

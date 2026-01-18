@@ -18,6 +18,7 @@ training:
   lr: 1e-3                   # Learning rate (1e-3)
   weight_decay: 0.01           # Weight decay for optimizer
   gradient_clip_norm: 1.0      # Gradient clipping max norm
+  dfake_gen_update_ratio: 10   # Update generator every N steps (DMD2-style)
 
   # Self-Forcing video generation
   num_frames: 21               # Number of frames for training (4 blocks × 3 frames)
