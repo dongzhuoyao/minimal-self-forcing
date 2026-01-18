@@ -219,14 +219,23 @@ class SelfForcingEngine:
         denoised_timestep_from = None
         denoised_timestep_to = None
         if return_timesteps and exit_flags:
-            # Find the exit timestep used (for timestep scheduling in DMD)
-            exit_timestep_idx = exit_flags[-1]  # Use last block's exit timestep
-            if exit_timestep_idx < len(self.denoising_steps) - 1:
-                denoised_timestep_to = 1000 - self.denoising_steps[exit_timestep_idx + 1]
-                denoised_timestep_from = 1000 - self.denoising_steps[exit_timestep_idx]
+            # If exit steps differ across blocks, timestep scheduling is ambiguous.
+            all_same_exit = all(exit_flags[0] == v for v in exit_flags)
+            if not all_same_exit:
+                if getattr(self, "ts_schedule", False) or getattr(self, "ts_schedule_max", False):
+                    raise ValueError(
+                        "Per-block exit timesteps detected by AI while ts_schedule/ts_schedule_max is enabled. "
+                        "Disable timestep scheduling or enforce a shared exit timestep across blocks."
+                    )
             else:
-                denoised_timestep_to = 0
-                denoised_timestep_from = 1000 - self.denoising_steps[exit_timestep_idx]
+                # Find the exit timestep used (for timestep scheduling in DMD)
+                exit_timestep_idx = exit_flags[0]
+                if exit_timestep_idx < len(self.denoising_steps) - 1:
+                    denoised_timestep_to = 1000 - self.denoising_steps[exit_timestep_idx + 1]
+                    denoised_timestep_from = 1000 - self.denoising_steps[exit_timestep_idx]
+                else:
+                    denoised_timestep_to = 0
+                    denoised_timestep_from = 1000 - self.denoising_steps[exit_timestep_idx]
         
         if return_timesteps:
             return output, denoised_timestep_from, denoised_timestep_to
