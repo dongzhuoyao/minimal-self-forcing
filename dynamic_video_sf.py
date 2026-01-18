@@ -156,22 +156,27 @@ class SelfForcingEngine:
         else:
             raise ValueError(f"Unsupported prediction_type: {prediction_type}. Supported types: 'vf', 'x0'")
     
-    def _simulate_self_forcing_by_vf(
+    def _simulate_self_forcing_core(
         self,
         noise: torch.Tensor,
         conditional_dict: Dict[str, torch.Tensor],
-        output: torch.Tensor,
         exit_flags: list,
         start_gradient_frame_index: int,
         batch_size: int,
         num_blocks: int
-    ):
+    ) -> torch.Tensor:
         """
-        Simulate Self-Forcing with vector field (vf) prediction type.
-        Uses deterministic ODE integration (no noise addition between steps).
+        Core Self-Forcing simulation logic.
+        Always converts prediction to x0 first (using _convert_prediction_to_x0),
+        then uses scheduler.add_noise() for next timestep.
+        Matches original implementation.
+        
+        Returns:
+            output: Tensor of shape [B, F, C, H, W] with gradients preserved
         """
         current_start_frame = 0
         all_num_frames = [self.num_frames_per_block] * num_blocks
+        output_blocks = []
         
         for block_index, current_num_frames in enumerate(all_num_frames):
             # Get noise for this block
@@ -179,7 +184,7 @@ class SelfForcingEngine:
                 :, current_start_frame:current_start_frame + current_num_frames
             ]
             
-            # ODE integration loop (deterministic, no noise addition)
+            # Denoising loop (matches original: always uses scheduler.add_noise)
             for index, current_timestep in enumerate(self.denoising_steps):
                 exit_flag = (index == exit_flags[block_index])
                 
@@ -194,44 +199,45 @@ class SelfForcingEngine:
                 if not exit_flag:
                     # Intermediate timesteps: no gradients (for efficiency)
                     with torch.no_grad():
-                        pred_vf, _ = self.generator(
+                        pred, _ = self.generator(
                             noisy_input, timestep, conditional_dict
                         )
                     
-                    # Convert vector field to x0 estimate: x0 = x_t + t * v_t
-                    num_train_timestep = getattr(self, 'num_train_timestep', 1000)
-                    t = timestep.float().unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) / num_train_timestep
-                    denoised_pred = noisy_input + t * pred_vf
+                    # Convert prediction to x0 estimate (handles both vf and x0)
+                    denoised_pred = self._convert_prediction_to_x0(pred, noisy_input, timestep)
                     
-                    # ODE step: deterministic update to next timestep (no noise addition)
+                    # Add noise for next timestep (matches original: always stochastic)
                     if index < len(self.denoising_steps) - 1:
                         next_timestep = self.denoising_steps[index + 1]
-                        # Simple Euler step: x_{t+1} = x_t + dt * v_t
-                        # For flow matching, we can use the predicted x0 directly
-                        dt = (next_timestep - current_timestep) / num_train_timestep
-                        noisy_input = noisy_input + dt * pred_vf
+                        noisy_input = self.scheduler.add_noise(
+                            denoised_pred.flatten(0, 1),
+                            torch.randn_like(denoised_pred.flatten(0, 1)),
+                            next_timestep * torch.ones(
+                                batch_size * current_num_frames,
+                                device=self.device,
+                                dtype=torch.long
+                            )
+                        ).unflatten(0, denoised_pred.shape[:2])
                 else:
                     # Selected timestep: compute gradients only for last 21 frames
                     if current_start_frame < start_gradient_frame_index:
                         # Early blocks: no gradients
                         with torch.no_grad():
-                            pred_vf, _ = self.generator(
+                            pred, _ = self.generator(
                                 noisy_input, timestep, conditional_dict
                             )
                     else:
                         # Later blocks: gradients enabled
-                        pred_vf, _ = self.generator(
+                        pred, _ = self.generator(
                             noisy_input, timestep, conditional_dict
                         )
                     
-                    # Convert vector field to x0 estimate
-                    num_train_timestep = getattr(self, 'num_train_timestep', 1000)
-                    t = timestep.float().unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) / num_train_timestep
-                    denoised_pred = noisy_input + t * pred_vf
+                    # Convert prediction to x0 estimate (handles both vf and x0)
+                    denoised_pred = self._convert_prediction_to_x0(pred, noisy_input, timestep)
                     break
             
-            # Store output for this block
-            output[:, current_start_frame:current_start_frame + current_num_frames] = denoised_pred
+            # Store output block (maintains gradient flow)
+            output_blocks.append(denoised_pred)
             
             # Update KV cache
             context_timestep = torch.full(
@@ -260,106 +266,10 @@ class SelfForcingEngine:
                 )
             
             current_start_frame += current_num_frames
-    
-    def _simulate_self_forcing_by_x0(
-        self,
-        noise: torch.Tensor,
-        conditional_dict: Dict[str, torch.Tensor],
-        output: torch.Tensor,
-        exit_flags: list,
-        start_gradient_frame_index: int,
-        batch_size: int,
-        num_blocks: int
-    ):
-        """
-        Simulate Self-Forcing with x0 prediction type.
-        Uses stochastic VE-SDE steps (adds noise between timesteps).
-        """
-        current_start_frame = 0
-        all_num_frames = [self.num_frames_per_block] * num_blocks
         
-        for block_index, current_num_frames in enumerate(all_num_frames):
-            # Get noise for this block
-            noisy_input = noise[
-                :, current_start_frame:current_start_frame + current_num_frames
-            ]
-            
-            # Stochastic denoising loop (adds noise between steps)
-            for index, current_timestep in enumerate(self.denoising_steps):
-                exit_flag = (index == exit_flags[block_index])
-                
-                # Create timestep tensor for this block
-                timestep = torch.full(
-                    (batch_size, current_num_frames),
-                    current_timestep,
-                    device=self.device,
-                    dtype=torch.long
-                )
-                
-                if not exit_flag:
-                    # Intermediate timesteps: no gradients (for efficiency)
-                    with torch.no_grad():
-                        pred_x0, _ = self.generator(
-                            noisy_input, timestep, conditional_dict
-                        )
-                    
-                    # Direct x0 prediction: use as-is
-                    denoised_pred = pred_x0
-                    
-                    # Add noise for next timestep (VE-SDE style)
-                    if index < len(self.denoising_steps) - 1:
-                        next_timestep = self.denoising_steps[index + 1]
-                        noise_to_add = torch.randn_like(denoised_pred)
-                        alpha = 1.0 - (next_timestep / 1000.0)
-                        noisy_input = alpha * denoised_pred + (1 - alpha) * noise_to_add
-                else:
-                    # Selected timestep: compute gradients only for last 21 frames
-                    if current_start_frame < start_gradient_frame_index:
-                        # Early blocks: no gradients
-                        with torch.no_grad():
-                            pred_x0, _ = self.generator(
-                                noisy_input, timestep, conditional_dict
-                            )
-                    else:
-                        # Later blocks: gradients enabled
-                        pred_x0, _ = self.generator(
-                            noisy_input, timestep, conditional_dict
-                        )
-                    
-                    # Direct x0 prediction: use as-is
-                    denoised_pred = pred_x0
-                    break
-            
-            # Store output for this block
-            output[:, current_start_frame:current_start_frame + current_num_frames] = denoised_pred
-            
-            # Update KV cache
-            context_timestep = torch.full(
-                (batch_size, current_num_frames),
-                self.context_noise,
-                device=self.device,
-                dtype=torch.long
-            )
-            
-            if self.context_noise > 0:
-                context_noisy = self.scheduler.add_noise(
-                    denoised_pred.flatten(0, 1),
-                    torch.randn_like(denoised_pred.flatten(0, 1)),
-                    self.context_noise * torch.ones(
-                        batch_size * current_num_frames,
-                        device=self.device,
-                        dtype=torch.long
-                    )
-                ).unflatten(0, denoised_pred.shape[:2])
-            else:
-                context_noisy = denoised_pred
-            
-            with torch.no_grad():
-                _ = self.generator(
-                    context_noisy, context_timestep, conditional_dict
-                )
-            
-            current_start_frame += current_num_frames
+        # Concatenate blocks along frame dimension (maintains gradient flow)
+        output = torch.cat(output_blocks, dim=1)
+        return output
     
     def simulate_self_forcing(
         self,
@@ -389,12 +299,7 @@ class SelfForcingEngine:
         prediction_type = str(getattr(self, "prediction_type", "vf")).lower()
         
         if not hasattr(self, "_logged_prediction_type"):
-            if prediction_type == "vf":
-                print("simulate_self_forcing: prediction_type=vf (vector field); using deterministic ODE steps.")
-            elif prediction_type == "x0":
-                print("simulate_self_forcing: prediction_type=x0; using stochastic VE-SDE steps.")
-            else:
-                print(f"simulate_self_forcing: prediction_type={prediction_type}; using default steps.")
+            print(f"simulate_self_forcing: prediction_type={prediction_type}; always converts to x0 first, then uses scheduler.add_noise() (matches original).")
             self._logged_prediction_type = True
 
         batch_size, num_frames, num_channels, height, width = noise.shape
@@ -403,9 +308,6 @@ class SelfForcingEngine:
         assert num_frames % self.num_frames_per_block == 0, \
             f"num_frames ({num_frames}) must be divisible by num_frame_per_block ({self.num_frames_per_block})"
         num_blocks = num_frames // self.num_frames_per_block
-        
-        # Initialize output tensor
-        output = torch.zeros_like(noise)
         
         # Gradient control: only compute gradients for last 21 frames
         num_output_frames = num_frames
@@ -423,19 +325,11 @@ class SelfForcingEngine:
                 for _ in range(num_blocks)
             ]
         
-        # Dispatch to appropriate helper function based on prediction_type
-        if prediction_type == "vf":
-            self._simulate_self_forcing_by_vf(
-                noise, conditional_dict, output, exit_flags,
-                start_gradient_frame_index, batch_size, num_blocks
-            )
-        elif prediction_type == "x0":
-            self._simulate_self_forcing_by_x0(
-                noise, conditional_dict, output, exit_flags,
-                start_gradient_frame_index, batch_size, num_blocks
-            )
-        else:
-            raise ValueError(f"Unsupported prediction_type: {prediction_type}. Supported types: 'vf', 'x0'")
+        # Use unified function: always converts to x0 first, then uses scheduler.add_noise()
+        output = self._simulate_self_forcing_core(
+            noise, conditional_dict, exit_flags,
+            start_gradient_frame_index, batch_size, num_blocks
+        )
         
         # Return only last 21 frames for loss computation (matching official impl)
         if output.shape[1] > 21:

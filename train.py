@@ -264,6 +264,30 @@ class SimplifiedTrainer:
             metrics.update({k: v.item() if torch.is_tensor(v) else v 
                            for k, v in log_dict.items()})
 
+        # Log generated video to wandb at visualization intervals
+        if self.use_wandb and self.step % self.viz_interval == 0 and self.step > 0:
+            with torch.no_grad():
+                # Convert generated video from [-1, 1] to [0, 1] range
+                video_for_logging = (generated_video.detach().cpu() + 1.0) / 2.0
+                video_for_logging = video_for_logging.clamp(0, 1)
+                
+                # Log first video in batch
+                if video_for_logging.shape[0] > 0:
+                    first_video = video_for_logging[0]  # [F, C, H, W]
+                    # Save as temporary GIF
+                    temp_gif_path = self.samples_dir / f"train_step_{self.step:06d}.gif"
+                    gif_fps = getattr(self.cfg.generation, 'gif_fps', 2)
+                    create_video_gif(first_video, str(temp_gif_path), fps=gif_fps)
+                    
+                    # Log to wandb
+                    wandb.log({
+                        "train/generated_video": wandb.Video(
+                            str(temp_gif_path),
+                            format="gif",
+                            caption=f"Step {self.step}"
+                        )
+                    }, step=self.step)
+
         self.metrics_history["loss"].append(loss_value)
         if "dmd_gradient_norm" in log_dict:
             self.metrics_history["dmd_gradient_norm"].append(
@@ -529,12 +553,7 @@ class SimplifiedTrainer:
         prediction_type = str(self.prediction_type).lower()
         
         if not hasattr(self, "_logged_prediction_type"):
-            if prediction_type == "vf":
-                print("generate_full_video: prediction_type=vf (vector field); using deterministic ODE steps.")
-            elif prediction_type == "x0":
-                print("generate_full_video: prediction_type=x0; using stochastic VE-SDE steps.")
-            else:
-                print(f"generate_full_video: prediction_type={prediction_type}; using default steps.")
+            print(f"generate_full_video: prediction_type={prediction_type}; always converts to x0 first, then uses scheduler.add_noise() (matches original).")
             self._logged_prediction_type = True
 
         batch_size, num_frames, num_channels, height, width = noise.shape
@@ -549,55 +568,34 @@ class SimplifiedTrainer:
             block_noise = noise[:, current_start_frame:current_start_frame + num_frames_per_block]
             noisy_input = block_noise
 
-            if prediction_type == "vf":
-                # Vector field: deterministic ODE integration
-                for step_idx, timestep in enumerate(self.denoising_steps):
-                    timestep_tensor = torch.full(
-                        (batch_size, num_frames_per_block),
-                        timestep,
-                        device=self.device,
-                        dtype=torch.long
-                    )
+            # Unified approach: always convert to x0 first, then use scheduler.add_noise()
+            for step_idx, timestep in enumerate(self.denoising_steps):
+                timestep_tensor = torch.full(
+                    (batch_size, num_frames_per_block),
+                    timestep,
+                    device=self.device,
+                    dtype=torch.long
+                )
 
-                    pred_vf, _ = self.generator(noisy_input, timestep_tensor, conditional_dict)
+                pred, _ = self.generator(noisy_input, timestep_tensor, conditional_dict)
 
-                    # Convert vector field to x0 estimate: x0 = x_t + t * v_t
-                    num_train_timestep = getattr(self.sf_engine, 'num_train_timestep', 1000)
-                    t = timestep_tensor.float().unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) / num_train_timestep
-                    denoised = noisy_input + t * pred_vf
+                # Convert prediction to x0 estimate (handles both vf and x0)
+                denoised = self.sf_engine._convert_prediction_to_x0(pred, noisy_input, timestep_tensor)
 
-                    if step_idx < len(self.denoising_steps) - 1:
-                        # ODE step: deterministic update (no noise addition)
-                        next_timestep = self.denoising_steps[step_idx + 1]
-                        dt = (next_timestep - timestep) / num_train_timestep
-                        noisy_input = noisy_input + dt * pred_vf
-                    else:
-                        output[:, current_start_frame:current_start_frame + num_frames_per_block] = denoised
-            elif prediction_type == "x0":
-                # Direct x0 prediction: stochastic VE-SDE steps
-                for step_idx, timestep in enumerate(self.denoising_steps):
-                    timestep_tensor = torch.full(
-                        (batch_size, num_frames_per_block),
-                        timestep,
-                        device=self.device,
-                        dtype=torch.long
-                    )
-
-                    pred_x0, _ = self.generator(noisy_input, timestep_tensor, conditional_dict)
-
-                    # Direct x0 prediction: use as-is
-                    denoised = pred_x0
-
-                    if step_idx < len(self.denoising_steps) - 1:
-                        # Add noise for next timestep (VE-SDE style)
-                        next_timestep = self.denoising_steps[step_idx + 1]
-                        noise_to_add = torch.randn_like(denoised)
-                        alpha = 1.0 - (next_timestep / 1000.0)
-                        noisy_input = alpha * denoised + (1 - alpha) * noise_to_add
-                    else:
-                        output[:, current_start_frame:current_start_frame + num_frames_per_block] = denoised
-            else:
-                raise ValueError(f"Unsupported prediction_type: {prediction_type}. Supported types: 'vf', 'x0'")
+                if step_idx < len(self.denoising_steps) - 1:
+                    # Add noise for next timestep (matches original: always uses scheduler.add_noise)
+                    next_timestep = self.denoising_steps[step_idx + 1]
+                    noisy_input = self.sf_engine.scheduler.add_noise(
+                        denoised.flatten(0, 1),
+                        torch.randn_like(denoised.flatten(0, 1)),
+                        next_timestep * torch.ones(
+                            batch_size * num_frames_per_block,
+                            device=self.device,
+                            dtype=torch.long
+                        )
+                    ).unflatten(0, denoised.shape[:2])
+                else:
+                    output[:, current_start_frame:current_start_frame + num_frames_per_block] = denoised
 
             current_start_frame += num_frames_per_block
 
