@@ -27,6 +27,10 @@ dataset:
   digit_size: 28               # Size of MNIST digit (default: 28, original MNIST size)
   max_velocity: 2.0            # Maximum velocity for digit movement
 
+# Training Defaults (shared)
+training:
+  prediction_type: "vf"        # Prediction type: "vf" (vector field), "x0", "sample", or "noise"
+
 # Generation/Inference Hyperparameters
 generation:
   num_frames: 9                # Number of frames to generate
@@ -50,4 +54,3 @@ wandb:
   project: "self-forcing"
   entity: dpose-team
   name: null
-

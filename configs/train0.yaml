@@ -26,7 +26,6 @@ training:
   num_frames_per_block: 3      # Frames per block
   min_timestep: 0              # Minimum timestep for noise
   max_timestep: 1000           # Maximum timestep for noise
-  prediction_type: "flow"      # Prediction type: "flow" (Flow Matching), "sample", or "noise"
   num_train_timestep: 1000     # Number of training timesteps
   sigma_max: 1.0               # Maximum sigma for Flow Matching scheduler
   sigma_min: 0.002994          # Minimum sigma for Flow Matching scheduler (0.003/1.002)

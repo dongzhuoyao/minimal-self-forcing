@@ -117,6 +117,7 @@ class SimplifiedTrainer:
         self.metrics_history = {
             "loss": [],
             "generator_loss": [],
+            "dmd_loss": [],
             "dmd_gradient_norm": [],
             "step": []
         }
@@ -225,7 +226,10 @@ class SimplifiedTrainer:
         metrics = {
             "loss": loss_value,
             "generator_loss": loss_value,
+            "dmd_loss": loss_value,
             "average_loss": self.average_loss,
+            "average_generator_loss": self.average_loss,
+            "average_dmd_loss": self.average_loss,
             "grad_norm": grad_norm.item(),
             "num_frames": num_generated_frames,
             "step": self.step
@@ -238,6 +242,7 @@ class SimplifiedTrainer:
 
         self.metrics_history["loss"].append(loss_value)
         self.metrics_history["generator_loss"].append(loss_value)
+        self.metrics_history["dmd_loss"].append(loss_value)
         if "dmd_gradient_norm" in log_dict:
             self.metrics_history["dmd_gradient_norm"].append(
                 log_dict["dmd_gradient_norm"].item() if torch.is_tensor(log_dict["dmd_gradient_norm"]) 
@@ -699,6 +704,7 @@ def main(cfg: DictConfig):
     trainer.sf_engine.ts_schedule_max = trainer.ts_schedule_max
     trainer.sf_engine.min_score_timestep = trainer.min_score_timestep
     trainer.sf_engine.guidance_scale = trainer.guidance_scale
+    trainer.sf_engine.prediction_type = cfg.training.prediction_type
     
 
     # Training plotter

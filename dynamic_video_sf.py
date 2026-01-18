@@ -426,23 +426,36 @@ class SelfForcingEngine:
         
         # Explicitly detach pred_real to ensure it doesn't contribute to gradients
         pred_real = pred_real.detach()
+
+        # Step 4: Convert predictions to x0 estimates when using vector-field prediction
+        prediction_type = getattr(self, "prediction_type", "vf").lower()
+        if prediction_type == "vf":
+            t = timestep.float() / float(num_train_timestep)
+            t = t.view(batch_size, num_frames, 1, 1, 1)
+            pred_fake_x0 = noisy_latent + t * pred_fake
+            pred_real_x0 = noisy_latent + t * pred_real
+        elif prediction_type == "x0":
+            pred_fake_x0 = pred_fake
+            pred_real_x0 = pred_real
+        else:
+            raise ValueError(f"Unsupported prediction_type: {prediction_type}")
         
-        # Step 4: Compute DMD gradient (DMD paper eq. 7)
-        # grad = pred_fake - pred_real
-        # pred_fake has gradients, pred_real is detached, so grad has gradients from pred_fake
-        grad = (pred_fake - pred_real)
+        # Step 5: Compute DMD gradient (DMD paper eq. 7)
+        # grad = (p_real - p_fake); pred_fake_x0 has gradients, pred_real_x0 is detached
+        p_real = (original_latent - pred_real_x0)
+        p_fake = (original_latent - pred_fake_x0)
+        grad = (p_real - p_fake)
         
         # Debug: Check if pred_fake and pred_real are identical (which would make grad=0)
-        pred_diff = torch.mean(torch.abs(pred_fake - pred_real)).item()
+        pred_diff = torch.mean(torch.abs(pred_fake_x0 - pred_real_x0)).item()
         
-        # Step 5: Normalize gradient (DMD paper eq. 8)
-        p_real = (original_latent - pred_real)
+        # Step 6: Normalize gradient (DMD paper eq. 8)
         normalizer = torch.abs(p_real).mean(dim=[1, 2, 3, 4], keepdim=True)
         normalizer = normalizer.clamp(min=1e-8)  # Avoid division by zero
         grad = grad / normalizer
         grad = torch.nan_to_num(grad)
-        
-        # Step 6: Compute DMD loss (DMD paper eq. 7)
+
+        # Step 7: Compute DMD loss (DMD paper eq. 7)
         # Matching original implementation: loss = 0.5 * MSE(original_latent, original_latent - grad)
         # IMPORTANT: original_latent has gradients (from generator), grad is detached
         dmd_loss = 0.5 * F.mse_loss(
@@ -456,8 +469,8 @@ class SelfForcingEngine:
             "dmd_gradient_norm": torch.mean(torch.abs(grad)).detach(),
             "timestep": timestep.float().mean().detach(),
             "pred_diff": pred_diff,  # Debug: difference between pred_fake and pred_real
-            "pred_fake_norm": torch.mean(torch.abs(pred_fake)).detach(),
-            "pred_real_norm": torch.mean(torch.abs(pred_real)).detach(),
+            "pred_fake_norm": torch.mean(torch.abs(pred_fake_x0)).detach(),
+            "pred_real_norm": torch.mean(torch.abs(pred_real_x0)).detach(),
             "original_latent_norm": torch.mean(torch.abs(original_latent)).detach(),
         }
         

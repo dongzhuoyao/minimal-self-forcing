@@ -203,7 +203,7 @@ class PretrainingTrainer:
         ).unflatten(0, (batch_size, num_frames))
 
         # Compute loss with timestep weighting (matching official impl)
-        if self.prediction_type == 'flow':
+        if self.prediction_type == "vf":
             # Flow Matching loss
             loss = F.mse_loss(
                 flow_pred.float(), 
