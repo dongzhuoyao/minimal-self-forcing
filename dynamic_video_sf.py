@@ -12,6 +12,36 @@ import torch.nn.functional as F
 from typing import Dict, Optional, List
 
 
+def compute_logit_normal_timestep_sampling(
+    batch_size: int,
+    num_frames: int,
+    logit_mean: float = 0.0,
+    logit_std: float = 1.0,
+    device: str = 'cpu'
+) -> torch.Tensor:
+    """
+    Sample timestep values u in [0, 1] using logit-normal distribution.
+    
+    This is used for flow matching / vector field prediction to sample timesteps 
+    with non-uniform distribution, which helps with convergence on large-scale models.
+    
+    Args:
+        batch_size: Number of samples in batch
+        num_frames: Number of frames per video
+        logit_mean: Mean of the underlying normal distribution
+        logit_std: Standard deviation of the underlying normal distribution
+        device: Device to place samples on
+        
+    Returns:
+        u: [batch_size, num_frames] tensor of values in [0, 1]
+    """
+    # Sample from normal distribution
+    normal_samples = torch.randn(batch_size, num_frames, device=device) * logit_std + logit_mean
+    # Apply sigmoid to map to (0, 1)
+    u = torch.sigmoid(normal_samples)
+    return u
+
+
 class SelfForcingEngine:
     """
     Self-Forcing engine for autoregressive video generation.
@@ -298,6 +328,7 @@ class SelfForcingEngine:
         - Uses generator itself as score network (self-distillation)
         - Computes DMD gradient and matches distributions
         - Supports timestep scheduling based on denoised timesteps
+        - Uses logit-normal timestep sampling for vector field prediction (flow matching style)
         
         Based on DMD paper: https://arxiv.org/abs/2311.18828
         
@@ -311,9 +342,12 @@ class SelfForcingEngine:
             num_train_timestep: Total training timesteps
             min_step: Minimum timestep for sampling
             max_step: Maximum timestep for sampling
-            timestep_shift: Timestep shift factor
+            timestep_shift: Timestep shift factor (only used for non-vf prediction types)
             ts_schedule: Use timestep scheduling
             guidance_scale: Classifier-free guidance scale
+            prediction_type: "vf" (vector field) uses logit-normal sampling, others use uniform
+            logit_mean: Mean for logit-normal distribution (default: 0.0)
+            logit_std: Std for logit-normal distribution (default: 1.0)
             
         Returns:
             DMD loss tensor and log dict
@@ -340,6 +374,7 @@ class SelfForcingEngine:
             max_step = getattr(self, 'max_step', 980)
             min_score_timestep = getattr(self, 'min_score_timestep', 0)
             timestep_shift = getattr(self, 'timestep_shift', 1.0)
+            prediction_type = getattr(self, "prediction_type", "vf").lower()
             
             # Determine min_timestep: use denoised_timestep_to if ts_schedule is enabled, else min_score_timestep
             if ts_schedule and denoised_timestep_to is not None:
@@ -353,27 +388,50 @@ class SelfForcingEngine:
             else:
                 max_timestep = num_train_timestep
             
-            # Sample uniform timestep
-            timestep_value = torch.randint(
-                min_timestep, max_timestep + 1, (1,), device=device
-            ).item()
-            
-            # Apply timestep shift if needed (matching original DMD implementation)
-            if timestep_shift > 1.0:
-                timestep_value = int(
-                    timestep_shift * (timestep_value / 1000.0) / 
-                    (1 + (timestep_shift - 1) * (timestep_value / 1000.0)) * 1000
+            # Use logit-normal sampling for vector field prediction (flow matching style)
+            # Otherwise use uniform sampling (original DMD)
+            if prediction_type == "vf":
+                # Logit-normal timestep sampling (similar to minimal-dmd-main flow matching)
+                logit_mean = getattr(self, 'logit_mean', 0.0)
+                logit_std = getattr(self, 'logit_std', 1.0)
+                
+                # Sample u in [0, 1] using logit-normal distribution
+                u = compute_logit_normal_timestep_sampling(
+                    batch_size=batch_size,
+                    num_frames=num_frames,
+                    logit_mean=logit_mean,
+                    logit_std=logit_std,
+                    device=device
                 )
-                # Clamp to [min_step, max_step] after shift
-                timestep_value = max(min_step, min(max_step, timestep_value))
-        
-        # Create timestep tensor with shape [B, F] matching the video shape
-        timestep = torch.full(
-            (batch_size, num_frames),
-            timestep_value,
-            device=device,
-            dtype=torch.long
-        )
+                
+                # Convert u to timestep indices in [min_timestep, max_timestep]
+                timestep_float = min_timestep + u * (max_timestep - min_timestep)
+                timestep = timestep_float.long()
+                
+                # Clamp to valid range
+                timestep = torch.clamp(timestep, min_step, max_step)
+            else:
+                # Uniform timestep sampling (original DMD)
+                timestep_value = torch.randint(
+                    min_timestep, max_timestep + 1, (1,), device=device
+                ).item()
+                
+                # Apply timestep shift if needed (matching original DMD implementation)
+                if timestep_shift > 1.0:
+                    timestep_value = int(
+                        timestep_shift * (timestep_value / 1000.0) / 
+                        (1 + (timestep_shift - 1) * (timestep_value / 1000.0)) * 1000
+                    )
+                    # Clamp to [min_step, max_step] after shift
+                    timestep_value = max(min_step, min(max_step, timestep_value))
+                
+                # Create timestep tensor with shape [B, F] matching the video shape
+                timestep = torch.full(
+                    (batch_size, num_frames),
+                    timestep_value,
+                    device=device,
+                    dtype=torch.long
+                )
         
         # Step 2: Add noise to generated video (no gradients through noise path)
         with torch.no_grad():

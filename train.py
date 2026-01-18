@@ -721,6 +721,8 @@ def main(cfg: DictConfig):
     trainer.sf_engine.min_score_timestep = trainer.min_score_timestep
     trainer.sf_engine.guidance_scale = trainer.guidance_scale
     trainer.sf_engine.prediction_type = cfg.training.prediction_type
+    trainer.sf_engine.logit_mean = cfg.training.logit_mean
+    trainer.sf_engine.logit_std = cfg.training.logit_std
     
 
     # Training plotter
