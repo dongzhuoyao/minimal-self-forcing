@@ -32,6 +32,8 @@ training:
   prediction_type: "vf"        # Prediction type: "vf" (vector field), "x0", "sample", or "noise"
   logit_mean: 0.0               # Mean for logit-normal timestep sampling (used when prediction_type="vf")
   logit_std: 1.0                # Std for logit-normal timestep sampling (used when prediction_type="vf")
+  video_height: 64              # Video height
+  video_width: 64               # Video width
 
 # Generation/Inference Hyperparameters
 generation:

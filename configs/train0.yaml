@@ -37,8 +37,6 @@ training:
 
   # Dataset (more samples for pretraining)
   num_samples: 100             # Number of training samples in dataset
-  video_height: 64             # Video height
-  video_width: 64              # Video width
   video_frames: 9              # Number of frames per video in dataset
 
 

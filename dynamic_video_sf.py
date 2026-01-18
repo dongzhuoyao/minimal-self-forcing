@@ -277,40 +277,6 @@ class SelfForcingEngine:
             return output, denoised_timestep_from, denoised_timestep_to
         return output
     
-    def compute_self_forcing_loss(
-        self,
-        generated_video: torch.Tensor,
-        conditional_dict: Optional[Dict[str, torch.Tensor]] = None,
-        unconditional_dict: Optional[Dict[str, torch.Tensor]] = None,
-        denoised_timestep_from: Optional[int] = None,
-        denoised_timestep_to: Optional[int] = None,
-        compute_generator_gradient: bool = True
-    ):
-        """
-        Compute Self-Forcing loss.
-        
-        Self-Forcing is data-free and does NOT require ground truth videos.
-        Uses DMD (Distribution Matching Distillation) for distribution matching.
-        
-        Args:
-            generated_video: Generated video tensor [B, F, C, H, W]
-            conditional_dict: Conditional information (text embeddings)
-            unconditional_dict: Unconditional information (null embeddings)
-            denoised_timestep_from: Start timestep for DMD scheduling
-            denoised_timestep_to: End timestep for DMD scheduling
-            
-        Returns:
-            Loss tensor and log dict
-        """
-        return self.compute_dmd_loss(
-            generated_video, 
-            conditional_dict, 
-            unconditional_dict,
-            denoised_timestep_from,
-            denoised_timestep_to,
-            compute_generator_gradient=compute_generator_gradient
-        )
-    
     def compute_dmd_loss(
         self,
         generated_video: torch.Tensor,
@@ -475,6 +441,7 @@ class SelfForcingEngine:
         
         # Fake score: compute WITH gradients (student network)
         if fake_guidance_scale != 0.0:
+            raise NotImplementedError("currently not supported for CFG, as I don't know how to do it when prediction_type is 'vf'")
             if compute_generator_gradient:
                 pred_fake_uncond, _ = self.generator(noisy_latent, timestep, unconditional_dict)
             else:
@@ -663,7 +630,7 @@ def demo_single_forward():
     print(f"\n7. Computing Self-Forcing loss...")
     # Generator is already in train mode
     
-    loss, _ = sf_engine.compute_self_forcing_loss(
+    loss, _ = sf_engine.compute_dmd_loss(
         generated_video,
         conditional_dict=conditional_dict
     )

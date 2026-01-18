@@ -203,7 +203,7 @@ class SimplifiedTrainer:
         # Step 4: Compute Self-Forcing loss (data-free, uses DMD)
         # Use empty unconditional dict (model will create dummy embeddings if needed)
         unconditional_dict = {}
-        loss, log_dict = self.sf_engine.compute_self_forcing_loss(
+        loss, log_dict = self.sf_engine.compute_dmd_loss(
             generated_video,
             conditional_dict=conditional_dict,
             unconditional_dict=unconditional_dict,
