@@ -361,6 +361,357 @@ class SelfForcingEngine:
             return output, denoised_timestep_from, denoised_timestep_to
         return output
     
+    def generate_full_video(
+        self,
+        noise: torch.Tensor,
+        conditional_dict: Dict[str, torch.Tensor],
+        num_frames_per_block: int = 3
+    ) -> torch.Tensor:
+        """Generate full video for visualization with KV cache support."""
+        prediction_type = str(getattr(self, "prediction_type", "vf")).lower()
+        
+        if not hasattr(self, "_logged_generate_full_video"):
+            print(f"generate_full_video: prediction_type={prediction_type}; always converts to x0 first, then uses scheduler.add_noise() (matches original).")
+            self._logged_generate_full_video = True
+
+        batch_size, num_frames, num_channels, height, width = noise.shape
+
+        assert num_frames % num_frames_per_block == 0
+        num_blocks = num_frames // num_frames_per_block
+
+        # Initialize KV cache for autoregressive generation
+        # Calculate frame_seq_length from patch_size
+        patch_size = getattr(self.generator, 'patch_size', (1, 4, 4))
+        h_patched = height // patch_size[1]
+        w_patched = width // patch_size[2]
+        frame_seq_length = h_patched * w_patched
+        
+        # Calculate KV cache size (use a reasonable default if local_attn_size not available)
+        local_attn_size = getattr(self.generator, 'local_attn_size', -1)
+        if local_attn_size != -1:
+            kv_cache_size = local_attn_size * frame_seq_length
+        else:
+            # Default: enough for all frames
+            kv_cache_size = num_frames * frame_seq_length
+        
+        num_layers = getattr(self.generator, 'num_layers', 4)
+        num_heads = getattr(self.generator, 'num_heads', 16)
+        head_dim = getattr(self.generator, 'dim', 2048) // num_heads
+        
+        # Initialize KV cache (one per transformer block)
+        kv_cache = []
+        for _ in range(num_layers):
+            kv_cache.append({
+                "k": torch.zeros([batch_size, kv_cache_size, num_heads, head_dim], 
+                                dtype=noise.dtype, device=self.device),
+                "v": torch.zeros([batch_size, kv_cache_size, num_heads, head_dim], 
+                                dtype=noise.dtype, device=self.device),
+                "global_end_index": torch.tensor([0], dtype=torch.long, device=self.device),
+                "local_end_index": torch.tensor([0], dtype=torch.long, device=self.device)
+            })
+        
+        # Initialize cross-attention cache (if needed)
+        crossattn_cache = None
+        if hasattr(self.generator, 'use_cross_attn') and getattr(self.generator, 'use_cross_attn', False):
+            crossattn_cache = []
+            for _ in range(num_layers):
+                crossattn_cache.append({
+                    "k": torch.zeros([batch_size, 512, num_heads, head_dim], 
+                                    dtype=noise.dtype, device=self.device),
+                    "v": torch.zeros([batch_size, 512, num_heads, head_dim], 
+                                    dtype=noise.dtype, device=self.device),
+                    "is_init": False
+                })
+
+        output = torch.zeros_like(noise)
+        current_start_frame = 0
+        current_start = 0  # Position in sequence for KV cache
+
+        for block_idx in range(num_blocks):
+            block_noise = noise[:, current_start_frame:current_start_frame + num_frames_per_block]
+            noisy_input = block_noise
+
+            # Unified approach: always convert to x0 first, then use scheduler.add_noise()
+            for step_idx, timestep in enumerate(self.denoising_steps):
+                timestep_tensor = torch.full(
+                    (batch_size, num_frames_per_block),
+                    timestep,
+                    device=self.device,
+                    dtype=torch.long
+                )
+
+                # Pass KV cache and current_start for autoregressive context
+                pred, _ = self.generator(
+                    noisy_input, 
+                    timestep_tensor, 
+                    conditional_dict,
+                    kv_cache=kv_cache,
+                    crossattn_cache=crossattn_cache,
+                    current_start=current_start
+                )
+
+                # Convert prediction to x0 estimate (handles both vf and x0)
+                denoised = self._convert_prediction_to_x0(pred, noisy_input, timestep_tensor)
+
+                if step_idx < len(self.denoising_steps) - 1:
+                    # Add noise for next timestep (matches original: always uses scheduler.add_noise)
+                    next_timestep = self.denoising_steps[step_idx + 1]
+                    noisy_input = self.scheduler.add_noise(
+                        denoised.flatten(0, 1),
+                        torch.randn_like(denoised.flatten(0, 1)),
+                        next_timestep * torch.ones(
+                            batch_size * num_frames_per_block,
+                            device=self.device,
+                            dtype=torch.long
+                        )
+                    ).unflatten(0, denoised.shape[:2])
+                else:
+                    output[:, current_start_frame:current_start_frame + num_frames_per_block] = denoised
+
+            # Update KV cache after each block (matches simulate_self_forcing)
+            context_timestep = torch.full(
+                (batch_size, num_frames_per_block),
+                self.context_noise,
+                device=self.device,
+                dtype=torch.long
+            )
+            
+            if self.context_noise > 0:
+                context_noisy = self.scheduler.add_noise(
+                    denoised.flatten(0, 1),
+                    torch.randn_like(denoised.flatten(0, 1)),
+                    self.context_noise * torch.ones(
+                        batch_size * num_frames_per_block,
+                        device=self.device,
+                        dtype=torch.long
+                    )
+                ).unflatten(0, denoised.shape[:2])
+            else:
+                context_noisy = denoised
+            
+            # Update cache with denoised frames (no gradients needed for visualization)
+            with torch.no_grad():
+                _ = self.generator(
+                    context_noisy,
+                    context_timestep,
+                    conditional_dict,
+                    kv_cache=kv_cache,
+                    crossattn_cache=crossattn_cache,
+                    current_start=current_start
+                )
+            
+            # Update positions for next block
+            current_start_frame += num_frames_per_block
+            current_start += num_frames_per_block * frame_seq_length
+
+        return output
+    
+    def generate_sample_videos(
+        self,
+        num_samples: int = 4,
+        num_frames: int = 9,
+        num_frames_per_block: int = 3,
+        digits: Optional[List[int]] = None,
+        ground_truth_videos: Optional[torch.Tensor] = None,
+        gif_fps: int = 2,
+        samples_dir: Optional[str] = None,
+        step: int = 0,
+        use_wandb: bool = False
+    ):
+        """Generate sample videos for visualization during training.
+        
+        Args:
+            num_samples: Number of videos to generate
+            num_frames: Number of frames per video
+            num_frames_per_block: Frames per block for autoregressive generation
+            digits: List of digit labels (0-9) to visualize. If None, uses empty labels.
+            ground_truth_videos: Optional ground truth videos for comparison
+            gif_fps: FPS for GIF output
+            samples_dir: Directory to save samples (Path or str)
+            step: Current training step (for filenames)
+            use_wandb: Whether to log to wandb
+        """
+        self.generator.eval()
+
+        # Prepare labels for visualization
+        if digits is None:
+            digit_labels = None
+        else:
+            digit_labels = digits[:num_samples]
+            # Pad with None if needed
+            while len(digit_labels) < num_samples:
+                digit_labels.append(None)
+
+        # Import visualization functions (optional)
+        try:
+            from moving_mnist import create_video_gif, save_video_grid
+        except ImportError:
+            print("Warning: moving_mnist not available, skipping video visualization")
+            self.generator.train()
+            return
+
+        # Import wandb (optional)
+        try:
+            import wandb
+            WANDB_AVAILABLE = True
+        except ImportError:
+            WANDB_AVAILABLE = False
+            if use_wandb:
+                print("Warning: wandb not available, skipping wandb logging")
+
+        with torch.no_grad():
+            # Use empty conditional dict (model will create dummy embeddings if needed)
+            conditional_dict = {}
+
+            batch_size = num_samples
+            noise = torch.randn(
+                batch_size, num_frames, 3, 64, 64,
+                device=self.device
+            )
+
+            generated_videos = self.generate_full_video(noise, conditional_dict, num_frames_per_block)
+
+            # Normalize to [0, 1]
+            generated_videos = (generated_videos + 1.0) / 2.0
+            generated_videos = generated_videos.clamp(0, 1)
+
+            # Process ground truth videos if provided
+            gt_videos_list = None
+            if ground_truth_videos is not None:
+                if ground_truth_videos.device != self.device:
+                    ground_truth_videos = ground_truth_videos.to(self.device)
+
+                if ground_truth_videos.min() < 0:
+                    ground_truth_videos = (ground_truth_videos + 1.0) / 2.0
+                ground_truth_videos = ground_truth_videos.clamp(0, 1)
+
+                if ground_truth_videos.shape[2:] != generated_videos.shape[2:]:
+                    import numpy as np
+                    from PIL import Image
+                    gt_resized = []
+                    for gt_vid in ground_truth_videos:
+                        # gt_vid shape: [F, C, H, W]
+                        # Squeeze out any extra batch dimensions
+                        while gt_vid.dim() > 4:
+                            gt_vid = gt_vid.squeeze(0)
+                        
+                        frames_resized = []
+                        # Iterate over frames: frame shape should be [C, H, W]
+                        for frame_idx in range(gt_vid.shape[0]):
+                            frame = gt_vid[frame_idx]  # [C, H, W]
+                            
+                            # Ensure frame is 3D [C, H, W]
+                            if frame.dim() != 3:
+                                # If somehow still has extra dims, squeeze them
+                                while frame.dim() > 3:
+                                    frame = frame.squeeze(0)
+                            
+                            frame_np = frame.permute(1, 2, 0).cpu().numpy()
+                            img = Image.fromarray((frame_np * 255).astype(np.uint8))
+                            target_size = (generated_videos.shape[-1], generated_videos.shape[-2])
+                            img_resized = img.resize(target_size, Image.Resampling.LANCZOS)
+                            frame_resized = torch.from_numpy(np.array(img_resized)).float() / 255.0
+                            frame_resized = frame_resized.permute(2, 0, 1)
+                            frames_resized.append(frame_resized)
+                        gt_resized.append(torch.stack(frames_resized))
+                    ground_truth_videos = torch.stack(gt_resized).to(self.device)
+
+                if ground_truth_videos.shape[1] != num_frames:
+                    ground_truth_videos = ground_truth_videos[:, :num_frames]
+
+                ground_truth_videos = ground_truth_videos[:num_samples]
+                gt_videos_list = [gt_video for gt_video in ground_truth_videos]
+
+            # Convert samples_dir to Path if string
+            from pathlib import Path
+            if samples_dir is not None:
+                samples_dir = Path(samples_dir)
+                samples_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                print("Warning: samples_dir not provided, skipping file saving")
+                self.generator.train()
+                return
+
+            # Save GIFs
+            videos_list = []
+            for i, video_tensor in enumerate(generated_videos):
+                gif_path = samples_dir / f"step_{step:06d}_sample_{i:02d}.gif"
+                create_video_gif(video_tensor, str(gif_path), fps=gif_fps)
+                videos_list.append(video_tensor)
+
+            gt_gif_paths = []
+            if gt_videos_list is not None:
+                for i, gt_video in enumerate(gt_videos_list):
+                    gt_gif_path = samples_dir / f"step_{step:06d}_gt_{i:02d}.gif"
+                    create_video_gif(gt_video, str(gt_gif_path), fps=gif_fps)
+                    gt_gif_paths.append(gt_gif_path)
+
+            # Save grid
+            grid_path = samples_dir / f"step_{step:06d}_grid.png"
+            # Format labels for visualization: "Digit 0", "Digit 1", etc.
+            if digit_labels:
+                labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
+            else:
+                labels_for_viz = [""] * num_samples
+            save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
+
+            comparison_grid_path = None
+            if gt_videos_list is not None:
+                comparison_grid_path = samples_dir / f"step_{step:06d}_comparison_grid.png"
+                comparison_videos = []
+                comparison_prompts = []
+                for gen_vid, gt_vid, label in zip(videos_list, gt_videos_list, labels_for_viz):
+                    comparison_videos.append(gen_vid)
+                    comparison_videos.append(gt_vid)
+                    comparison_prompts.append(f"{label} (Generated)")
+                    comparison_prompts.append(f"{label} (Ground Truth)")
+                save_video_grid(comparison_videos, str(comparison_grid_path), prompts=comparison_prompts, ncols=2)
+
+            print(f"  Saved sample videos to {samples_dir}")
+
+            # Log to wandb
+            if use_wandb and WANDB_AVAILABLE:
+                samples_payload = {
+                    "vis_sample": wandb.Image(str(grid_path)),
+                }
+
+                if comparison_grid_path is not None:
+                    samples_payload["vis_comparison_gid"] = wandb.Image(str(comparison_grid_path))
+
+                samples_table = wandb.Table(columns=[
+                    "index",
+                    "digit",
+                    "generated_video",
+                    "ground_truth_video",
+                ])
+                for i, _video_tensor in enumerate(videos_list):
+                    gif_path = samples_dir / f"step_{step:06d}_sample_{i:02d}.gif"
+                    caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
+                    generated_video = wandb.Video(
+                        str(gif_path),
+                        format="gif",
+                        caption=caption,
+                    )
+                    gt_video = None
+                    if gt_gif_paths:
+                        gt_gif_path = gt_gif_paths[i]
+                        gt_caption = (
+                            f"Digit {digit_labels[i]} (GT)"
+                            if digit_labels and digit_labels[i] is not None
+                            else "Ground Truth"
+                        )
+                        gt_video = wandb.Video(
+                            str(gt_gif_path),
+                            format="gif",
+                            caption=gt_caption,
+                        )
+                    samples_table.add_data(i, caption, generated_video, gt_video)
+                samples_payload["vis_gt"] = samples_table
+
+                wandb.log(samples_payload, step=step)
+
+        self.generator.train()
+    
     def compute_dmd_loss(
         self,
         generated_video: torch.Tensor,
