@@ -336,7 +336,7 @@ class PretrainingTrainer:
             conditional_dict = {}
 
             batch_size = num_samples
-            height, width = 64, 64
+            height, width = 32, 32
 
             # Start from pure noise (normalized to match data range)
             # Flow Matching starts from noise distribution, typically N(0,1)

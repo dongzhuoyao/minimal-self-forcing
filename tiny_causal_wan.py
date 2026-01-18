@@ -411,21 +411,25 @@ class TinyCausalWanModel(nn.Module):
         context_lens = None
         
         # Process through transformer blocks (matching official structure)
-        kwargs = dict(
-            e=e0,
-            seq_lens=seq_lens,
-            grid_sizes=grid_sizes,
-            freqs=self.freqs,
-            context=context,
-            context_lens=context_lens,
-            block_mask=self.block_mask,
-            kv_cache=kv_cache,
-            crossattn_cache=crossattn_cache,
-            current_start=current_start,
-            cache_start=cache_start
-        )
-        
-        for block in self.blocks:
+        # Extract kv_cache and crossattn_cache for each block
+        for i, block in enumerate(self.blocks):
+            # Extract the cache dictionary for this specific block
+            block_kv_cache = kv_cache[i] if kv_cache is not None and i < len(kv_cache) else None
+            block_crossattn_cache = crossattn_cache[i] if crossattn_cache is not None and i < len(crossattn_cache) else None
+            
+            kwargs = dict(
+                e=e0,
+                seq_lens=seq_lens,
+                grid_sizes=grid_sizes,
+                freqs=self.freqs,
+                context=context,
+                context_lens=context_lens,
+                block_mask=self.block_mask,
+                kv_cache=block_kv_cache,
+                crossattn_cache=block_crossattn_cache,
+                current_start=current_start,
+                cache_start=cache_start
+            )
             x = block(x, **kwargs)
         
         # Output head (matching official: uses e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))

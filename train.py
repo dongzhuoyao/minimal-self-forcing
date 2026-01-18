@@ -401,7 +401,9 @@ class SimplifiedTrainer:
             gif_fps=gif_fps,
             samples_dir=str(self.samples_dir),
             step=self.step,
-            use_wandb=self.use_wandb
+            use_wandb=self.use_wandb,
+            video_height=self.video_height,
+            video_width=self.video_width
         )
 
 

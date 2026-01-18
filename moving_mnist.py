@@ -307,8 +307,8 @@ class MovingMNISTGenerator:
     
     def __init__(
         self,
-        width: int = 64,
-        height: int = 64,
+        width: int = 32,
+        height: int = 32,
         num_frames: int = 16,
         fps: int = 8,
         digit_size: int = 28,
@@ -593,8 +593,8 @@ class MovingMNISTDataset:
     def __init__(
         self,
         num_samples: int = 100,
-        width: int = 64,
-        height: int = 64,
+        width: int = 32,
+        height: int = 32,
         num_frames: int = 16,
         seed: int = 42,
         num_digits: int = 1,
@@ -854,7 +854,7 @@ if __name__ == "__main__":
                        help="Number of samples to generate")
     parser.add_argument("--width", type=int, default=64,
                        help="Video width")
-    parser.add_argument("--height", type=int, default=64,
+    parser.add_argument("--height", type=int, default=32,
                        help="Video height")
     parser.add_argument("--num_frames", type=int, default=9,
                        help="Number of frames per video")

@@ -469,9 +469,9 @@ def main():
     batch_size = len(prompts)
     
     # Create noise
-    # Shape: [B, F, C, H, W] where H=W=64 for tutorial
+    # Shape: [B, F, C, H, W] where H=W=32 for tutorial
     noise = torch.randn(
-        batch_size, num_frames, 3, 64, 64, 
+        batch_size, num_frames, 3, 32, 32, 
         device=device
     )
     

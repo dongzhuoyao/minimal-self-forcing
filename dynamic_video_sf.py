@@ -516,7 +516,9 @@ class SelfForcingEngine:
         gif_fps: int = 2,
         samples_dir: Optional[str] = None,
         step: int = 0,
-        use_wandb: bool = False
+        use_wandb: bool = False,
+        video_height: int = 32,
+        video_width: int = 32
     ):
         """Generate sample videos for visualization during training.
         
@@ -530,6 +532,8 @@ class SelfForcingEngine:
             samples_dir: Directory to save samples (Path or str)
             step: Current training step (for filenames)
             use_wandb: Whether to log to wandb
+            video_height: Height of generated videos
+            video_width: Width of generated videos
         """
         self.generator.eval()
 
@@ -565,7 +569,7 @@ class SelfForcingEngine:
 
             batch_size = num_samples
             noise = torch.randn(
-                batch_size, num_frames, 3, 64, 64,
+                batch_size, num_frames, 3, video_height, video_width,
                 device=self.device
             )
 
