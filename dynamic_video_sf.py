@@ -560,18 +560,18 @@ def demo_single_forward():
     
     # Run forward pass
     print(f"\n6. Running Self-Forcing forward pass...")
-    generator.eval()  # Set to eval mode for deterministic behavior
-    with torch.no_grad():
-        generated_video = sf_engine.simulate_self_forcing(
-            noise, conditional_dict
-        )
+    generator.train()  # Set to train mode to enable gradients for loss computation
+    # Note: simulate_self_forcing internally controls gradients (only last 21 frames)
+    generated_video = sf_engine.simulate_self_forcing(
+        noise, conditional_dict
+    )
     
     print(f"   Generated video shape: {generated_video.shape}")
     print(f"   Generated video range: [{generated_video.min():.3f}, {generated_video.max():.3f}]")
     
     # Compute loss
     print(f"\n7. Computing Self-Forcing loss...")
-    generator.train()  # Set to train mode for loss computation
+    # Generator is already in train mode
     
     loss, _ = sf_engine.compute_self_forcing_loss(
         generated_video,
