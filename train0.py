@@ -103,6 +103,10 @@ class PretrainingTrainer:
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
+        # Create checkpoints directory
+        self.checkpoints_dir = self.log_dir / "checkpoints"
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
         # Create samples directory
         self.samples_dir = self.log_dir / "samples"
         self.samples_dir.mkdir(parents=True, exist_ok=True)
@@ -279,7 +283,7 @@ class PretrainingTrainer:
         }
 
         suffix = "final" if final else f"step_{self.step:06d}"
-        checkpoint_path = self.log_dir / f"checkpoint_{suffix}.pt"
+        checkpoint_path = self.checkpoints_dir / f"checkpoint_{suffix}.pt"
         torch.save(checkpoint, checkpoint_path)
 
         if final or self.step % self.save_interval == 0:
@@ -947,10 +951,10 @@ def main(cfg: DictConfig):
     print("\n" + "=" * 70)
     print("Pretraining completed!")
     print("=" * 70)
-    print(f"\nCheckpoints saved to: {log_dir}")
-    print(f"Final checkpoint: {log_dir}/checkpoint_final.pt")
+    print(f"\nCheckpoints saved to: {log_dir}/checkpoints")
+    print(f"Final checkpoint: {log_dir}/checkpoints/checkpoint_final.pt")
     print("\nTo use this checkpoint for Self-Forcing training:")
-    print(f"  python train.py checkpoint={log_dir}/checkpoint_final.pt")
+    print(f"  python train.py checkpoint={log_dir}/checkpoints/checkpoint_final.pt")
     print("\nKey points:")
     print("1. Pretraining uses supervised learning with ground truth videos")
     print("2. Model learns to denoise noisy videos")
