@@ -85,7 +85,6 @@ class SimplifiedTrainer:
         self.video_height = cfg.training.video_height
         self.video_width = cfg.training.video_width
         self.gradient_clip_norm = cfg.training.gradient_clip_norm
-        self.use_dmd_loss = cfg.training.use_dmd_loss
         
         # DMD-specific configs
         self.num_train_timestep = cfg.training.num_train_timestep
@@ -199,8 +198,7 @@ class SimplifiedTrainer:
             conditional_dict=conditional_dict,
             unconditional_dict=unconditional_dict,
             denoised_timestep_from=denoised_timestep_from,
-            denoised_timestep_to=denoised_timestep_to,
-            use_dmd=self.use_dmd_loss
+            denoised_timestep_to=denoised_timestep_to
         )
 
         # Step 5: Backward pass

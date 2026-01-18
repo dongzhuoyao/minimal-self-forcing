@@ -238,8 +238,7 @@ class SelfForcingEngine:
         conditional_dict: Optional[Dict[str, torch.Tensor]] = None,
         unconditional_dict: Optional[Dict[str, torch.Tensor]] = None,
         denoised_timestep_from: Optional[int] = None,
-        denoised_timestep_to: Optional[int] = None,
-        use_dmd: bool = True
+        denoised_timestep_to: Optional[int] = None
     ):
         """
         Compute Self-Forcing loss.
@@ -253,21 +252,17 @@ class SelfForcingEngine:
             unconditional_dict: Unconditional information (null embeddings)
             denoised_timestep_from: Start timestep for DMD scheduling
             denoised_timestep_to: End timestep for DMD scheduling
-            use_dmd: If True, use DMD loss; if False, use simplified temporal loss
             
         Returns:
             Loss tensor and log dict
         """
-        if use_dmd:
-            return self.compute_dmd_loss(
-                generated_video, 
-                conditional_dict, 
-                unconditional_dict,
-                denoised_timestep_from,
-                denoised_timestep_to
-            )
-        else:
-            raise ValueError("use_dmd must be True")
+        return self.compute_dmd_loss(
+            generated_video, 
+            conditional_dict, 
+            unconditional_dict,
+            denoised_timestep_from,
+            denoised_timestep_to
+        )
     
     def compute_dmd_loss(
         self,
@@ -561,10 +556,9 @@ def demo_single_forward():
     print(f"\n7. Computing Self-Forcing loss...")
     generator.train()  # Set to train mode for loss computation
     
-    loss = sf_engine.compute_self_forcing_loss(
+    loss, _ = sf_engine.compute_self_forcing_loss(
         generated_video,
-        conditional_dict=conditional_dict,
-        use_dmd=True
+        conditional_dict=conditional_dict
     )
     
     print(f"   Loss value: {loss.item():.6f}")
