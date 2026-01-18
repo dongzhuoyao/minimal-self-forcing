@@ -29,7 +29,8 @@ class SelfForcingEngine:
         device: str,
         denoising_steps: List[int] = [1000, 750, 500, 250],
         num_frames_per_block: int = 3,
-        context_noise: int = 0
+        context_noise: int = 0,
+        same_step_across_blocks: bool = True
     ):
         """
         Initialize Self-Forcing engine.
@@ -48,6 +49,7 @@ class SelfForcingEngine:
         self.denoising_steps = denoising_steps
         self.num_frames_per_block = num_frames_per_block
         self.context_noise = context_noise
+        self.same_step_across_blocks = same_step_across_blocks
         
         # Create frozen copy of generator for real_score (teacher network)
         # Matching original implementation: real_score is a separate frozen model
@@ -118,10 +120,14 @@ class SelfForcingEngine:
         # Random exit flags: which timestep to compute gradients on (for efficiency)
         # In full impl, this is synchronized across distributed processes
         num_denoising_steps = len(self.denoising_steps)
-        exit_flags = [
-            torch.randint(0, num_denoising_steps, (1,), device=self.device).item()
-            for _ in range(num_blocks)
-        ]
+        if self.same_step_across_blocks:
+            exit_flag = torch.randint(0, num_denoising_steps, (1,), device=self.device).item()
+            exit_flags = [exit_flag] * num_blocks
+        else:
+            exit_flags = [
+                torch.randint(0, num_denoising_steps, (1,), device=self.device).item()
+                for _ in range(num_blocks)
+            ]
         
         # Block-by-block generation
         current_start_frame = 0
