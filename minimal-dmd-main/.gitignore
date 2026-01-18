@@ -1,0 +1,7 @@
+__pycache__
+
+log/
+wandb/
+checkpoints/
+
+outputs/
