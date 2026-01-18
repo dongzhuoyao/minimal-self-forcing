@@ -252,18 +252,6 @@ class SimplifiedTrainer:
         loss_str = f"Loss = {metrics['loss']:.8f}"
         if "average_loss" in metrics:
             loss_str += f", AvgLoss = {metrics['average_loss']:.8f}"
-        if "grad_norm" in metrics:
-            loss_str += f", GradNorm = {metrics['grad_norm']:.4f}"
-        if "dmd_gradient_norm" in metrics:
-            loss_str += f", DMDGradNorm = {metrics['dmd_gradient_norm']:.4f}"
-        if "pred_diff" in metrics:
-            loss_str += f", PredDiff = {metrics['pred_diff']:.6f}"
-        if "pred_fake_norm" in metrics:
-            loss_str += f", PredFakeNorm = {metrics['pred_fake_norm']:.4f}"
-        if "pred_real_norm" in metrics:
-            loss_str += f", PredRealNorm = {metrics['pred_real_norm']:.4f}"
-        if "original_latent_norm" in metrics:
-            loss_str += f", OrigLatentNorm = {metrics['original_latent_norm']:.4f}"
         if "num_frames" in metrics:
             loss_str += f", Frames = {metrics['num_frames']}"
         print(f"Step {self.step}: {loss_str}")
