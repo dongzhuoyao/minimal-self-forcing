@@ -20,7 +20,7 @@ training:
   gradient_clip_norm: 1.0      # Gradient clipping max norm
 
   # Self-Forcing video generation
-  num_frames: 12               # Number of frames for training (4 blocks × 3 frames)
+  num_frames: 21               # Number of frames for training (4 blocks × 3 frames)
   num_frames_per_block: 3      # Frames per block
   denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
   context_noise: 0             # Noise level for cache update

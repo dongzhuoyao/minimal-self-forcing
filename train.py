@@ -650,27 +650,6 @@ def main(cfg: DictConfig):
         output_dir=output_dir
     )
 
-    # Create Self-Forcing engine
-    trainer.sf_engine = SelfForcingEngine(
-        generator=generator,
-        scheduler=scheduler,
-        device=device,
-        denoising_steps=list(cfg.training.denoising_steps),
-        num_frames_per_block=cfg.training.num_frames_per_block,
-        context_noise=cfg.training.context_noise
-    )
-    
-    # Pass DMD configs to engine
-    trainer.sf_engine.num_train_timestep = trainer.num_train_timestep
-    trainer.sf_engine.min_step = trainer.min_step
-    trainer.sf_engine.max_step = trainer.max_step
-    trainer.sf_engine.timestep_shift = trainer.timestep_shift
-    trainer.sf_engine.ts_schedule = trainer.ts_schedule
-    trainer.sf_engine.ts_schedule_max = trainer.ts_schedule_max
-    trainer.sf_engine.min_score_timestep = trainer.min_score_timestep
-    trainer.sf_engine.guidance_scale = trainer.guidance_scale
-
-
     checkpoint_path = cfg.training.pretrained_checkpoint 
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
@@ -693,6 +672,26 @@ def main(cfg: DictConfig):
     training_type = checkpoint.get("training_type", "unknown")
     pretrain_step = checkpoint.get("step", 0)
     print(f"   Checkpoint type: {training_type}, trained for {pretrain_step} steps")
+
+    # Create Self-Forcing engine after loading weights so real_score matches generator
+    trainer.sf_engine = SelfForcingEngine(
+        generator=generator,
+        scheduler=scheduler,
+        device=device,
+        denoising_steps=list(cfg.training.denoising_steps),
+        num_frames_per_block=cfg.training.num_frames_per_block,
+        context_noise=cfg.training.context_noise
+    )
+    
+    # Pass DMD configs to engine
+    trainer.sf_engine.num_train_timestep = trainer.num_train_timestep
+    trainer.sf_engine.min_step = trainer.min_step
+    trainer.sf_engine.max_step = trainer.max_step
+    trainer.sf_engine.timestep_shift = trainer.timestep_shift
+    trainer.sf_engine.ts_schedule = trainer.ts_schedule
+    trainer.sf_engine.ts_schedule_max = trainer.ts_schedule_max
+    trainer.sf_engine.min_score_timestep = trainer.min_score_timestep
+    trainer.sf_engine.guidance_scale = trainer.guidance_scale
     
 
     # Training plotter
