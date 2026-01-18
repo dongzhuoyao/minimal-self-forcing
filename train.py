@@ -80,6 +80,14 @@ class SimplifiedTrainer:
         # Load training config values
         self.num_frames_per_block = cfg.training.num_frames_per_block
         self.denoising_steps = list(cfg.training.denoising_steps)
+        # Handle viz_denoising_steps: can be a single list or list of lists
+        viz_steps = getattr(cfg.training, "viz_denoising_steps", cfg.training.denoising_steps)
+        if viz_steps and isinstance(viz_steps[0], list):
+            # Already a list of lists
+            self.viz_denoising_steps = [list(steps) for steps in viz_steps]
+        else:
+            # Single list, convert to list of lists
+            self.viz_denoising_steps = [list(viz_steps)]
         self.context_noise = cfg.training.context_noise
         self.training_num_frames = cfg.training.num_frames
         self.video_height = cfg.training.video_height
@@ -403,7 +411,8 @@ class SimplifiedTrainer:
             step=self.step,
             use_wandb=self.use_wandb,
             video_height=self.video_height,
-            video_width=self.video_width
+            video_width=self.video_width,
+            viz_denoising_steps=self.viz_denoising_steps
         )
 
 

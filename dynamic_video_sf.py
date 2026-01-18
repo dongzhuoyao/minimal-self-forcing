@@ -365,14 +365,25 @@ class SelfForcingEngine:
         self,
         noise: torch.Tensor,
         conditional_dict: Dict[str, torch.Tensor],
-        num_frames_per_block: int = 3
+        num_frames_per_block: int = 3,
+        denoising_steps: Optional[List[int]] = None
     ) -> torch.Tensor:
-        """Generate full video for visualization with KV cache support."""
+        """Generate full video for visualization with KV cache support.
+        
+        Args:
+            noise: Initial noise tensor of shape [B, F, C, H, W]
+            conditional_dict: Conditional information
+            num_frames_per_block: Frames per block for autoregressive generation
+            denoising_steps: Optional list of denoising timesteps. If None, uses self.denoising_steps
+        """
         prediction_type = str(getattr(self, "prediction_type", "vf")).lower()
         
         if not hasattr(self, "_logged_generate_full_video"):
             print(f"generate_full_video: prediction_type={prediction_type}; always converts to x0 first, then uses scheduler.add_noise() (matches original).")
             self._logged_generate_full_video = True
+
+        # Use provided denoising_steps or fall back to self.denoising_steps
+        steps_to_use = denoising_steps if denoising_steps is not None else self.denoising_steps
 
         batch_size, num_frames, num_channels, height, width = noise.shape
 
@@ -432,7 +443,7 @@ class SelfForcingEngine:
             noisy_input = block_noise
 
             # Unified approach: always convert to x0 first, then use scheduler.add_noise()
-            for step_idx, timestep in enumerate(self.denoising_steps):
+            for step_idx, timestep in enumerate(steps_to_use):
                 timestep_tensor = torch.full(
                     (batch_size, num_frames_per_block),
                     timestep,
@@ -453,9 +464,9 @@ class SelfForcingEngine:
                 # Convert prediction to x0 estimate (handles both vf and x0)
                 denoised = self._convert_prediction_to_x0(pred, noisy_input, timestep_tensor)
 
-                if step_idx < len(self.denoising_steps) - 1:
+                if step_idx < len(steps_to_use) - 1:
                     # Add noise for next timestep (matches original: always uses scheduler.add_noise)
-                    next_timestep = self.denoising_steps[step_idx + 1]
+                    next_timestep = steps_to_use[step_idx + 1]
                     noisy_input = self.scheduler.add_noise(
                         denoised.flatten(0, 1),
                         torch.randn_like(denoised.flatten(0, 1)),
@@ -518,7 +529,8 @@ class SelfForcingEngine:
         step: int = 0,
         use_wandb: bool = False,
         video_height: int = 32,
-        video_width: int = 32
+        video_width: int = 32,
+        viz_denoising_steps: Optional[List] = None
     ):
         """Generate sample videos for visualization during training.
         
@@ -534,6 +546,11 @@ class SelfForcingEngine:
             use_wandb: Whether to log to wandb
             video_height: Height of generated videos
             video_width: Width of generated videos
+            viz_denoising_steps: Optional denoising steps for visualization. 
+                Can be:
+                - A single list of ints: [1000, 500] (single configuration)
+                - A list of lists: [[1000], [1000, 500], [1000, 750, 500, 250]] (multiple configurations)
+                - None: uses self.denoising_steps
         """
         self.generator.eval()
 
@@ -563,23 +580,36 @@ class SelfForcingEngine:
             if use_wandb:
                 print("Warning: wandb not available, skipping wandb logging")
 
+        # Normalize viz_denoising_steps to list of lists
+        if viz_denoising_steps is None:
+            viz_denoising_steps = [self.denoising_steps]
+        elif isinstance(viz_denoising_steps[0], int):
+            # Single configuration: convert to list of lists
+            viz_denoising_steps = [viz_denoising_steps]
+        # Otherwise, it's already a list of lists
+
+        # Convert samples_dir to Path if string
+        from pathlib import Path
+        if samples_dir is not None:
+            samples_dir = Path(samples_dir)
+            samples_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            print("Warning: samples_dir not provided, skipping file saving")
+            self.generator.train()
+            return
+
         with torch.no_grad():
             # Use empty conditional dict (model will create dummy embeddings if needed)
             conditional_dict = {}
 
             batch_size = num_samples
+            # Use the same noise for all configurations for fair comparison
             noise = torch.randn(
                 batch_size, num_frames, 3, video_height, video_width,
                 device=self.device
             )
 
-            generated_videos = self.generate_full_video(noise, conditional_dict, num_frames_per_block)
-
-            # Normalize to [0, 1]
-            generated_videos = (generated_videos + 1.0) / 2.0
-            generated_videos = generated_videos.clamp(0, 1)
-
-            # Process ground truth videos if provided
+            # Process ground truth videos if provided (only need to do this once)
             gt_videos_list = None
             if ground_truth_videos is not None:
                 if ground_truth_videos.device != self.device:
@@ -589,60 +619,53 @@ class SelfForcingEngine:
                     ground_truth_videos = (ground_truth_videos + 1.0) / 2.0
                 ground_truth_videos = ground_truth_videos.clamp(0, 1)
 
-                if ground_truth_videos.shape[2:] != generated_videos.shape[2:]:
-                    import numpy as np
-                    from PIL import Image
-                    gt_resized = []
-                    for gt_vid in ground_truth_videos:
-                        # gt_vid shape: [F, C, H, W]
-                        # Squeeze out any extra batch dimensions
-                        while gt_vid.dim() > 4:
-                            gt_vid = gt_vid.squeeze(0)
-                        
-                        frames_resized = []
-                        # Iterate over frames: frame shape should be [C, H, W]
-                        for frame_idx in range(gt_vid.shape[0]):
-                            frame = gt_vid[frame_idx]  # [C, H, W]
-                            
-                            # Ensure frame is 3D [C, H, W]
-                            if frame.dim() != 3:
-                                # If somehow still has extra dims, squeeze them
-                                while frame.dim() > 3:
-                                    frame = frame.squeeze(0)
-                            
-                            frame_np = frame.permute(1, 2, 0).cpu().numpy()
-                            img = Image.fromarray((frame_np * 255).astype(np.uint8))
-                            target_size = (generated_videos.shape[-1], generated_videos.shape[-2])
-                            img_resized = img.resize(target_size, Image.Resampling.LANCZOS)
-                            frame_resized = torch.from_numpy(np.array(img_resized)).float() / 255.0
-                            frame_resized = frame_resized.permute(2, 0, 1)
-                            frames_resized.append(frame_resized)
-                        gt_resized.append(torch.stack(frames_resized))
-                    ground_truth_videos = torch.stack(gt_resized).to(self.device)
-
                 if ground_truth_videos.shape[1] != num_frames:
                     ground_truth_videos = ground_truth_videos[:, :num_frames]
 
                 ground_truth_videos = ground_truth_videos[:num_samples]
                 gt_videos_list = [gt_video for gt_video in ground_truth_videos]
 
-            # Convert samples_dir to Path if string
-            from pathlib import Path
-            if samples_dir is not None:
-                samples_dir = Path(samples_dir)
-                samples_dir.mkdir(parents=True, exist_ok=True)
-            else:
-                print("Warning: samples_dir not provided, skipping file saving")
-                self.generator.train()
-                return
+            # Generate videos for each configuration
+            all_configs_videos = {}
+            all_configs_gif_paths = {}
+            
+            for config_idx, steps_config in enumerate(viz_denoising_steps):
+                num_steps = len(steps_config)
+                config_name = f"{num_steps}step"
+                
+                print(f"  Generating videos with {num_steps}-step sampling: {steps_config}")
+                
+                generated_videos = self.generate_full_video(
+                    noise, conditional_dict, num_frames_per_block, 
+                    denoising_steps=steps_config
+                )
 
-            # Save GIFs
-            videos_list = []
-            for i, video_tensor in enumerate(generated_videos):
-                gif_path = samples_dir / f"step_{step:06d}_sample_{i:02d}.gif"
-                create_video_gif(video_tensor, str(gif_path), fps=gif_fps)
-                videos_list.append(video_tensor)
+                # Normalize to [0, 1]
+                generated_videos = (generated_videos + 1.0) / 2.0
+                generated_videos = generated_videos.clamp(0, 1)
+                
+                all_configs_videos[config_name] = generated_videos
+                
+                # Save GIFs for this configuration
+                config_gif_paths = []
+                videos_list = []
+                for i, video_tensor in enumerate(generated_videos):
+                    gif_path = samples_dir / f"step_{step:06d}_sample_{i:02d}_{config_name}.gif"
+                    create_video_gif(video_tensor, str(gif_path), fps=gif_fps)
+                    config_gif_paths.append(gif_path)
+                    videos_list.append(video_tensor)
+                
+                all_configs_gif_paths[config_name] = config_gif_paths
+                
+                # Save grid for this configuration
+                grid_path = samples_dir / f"step_{step:06d}_grid_{config_name}.png"
+                if digit_labels:
+                    labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
+                else:
+                    labels_for_viz = [""] * num_samples
+                save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
 
+            # Save ground truth videos (only once, shared across all configs)
             gt_gif_paths = []
             if gt_videos_list is not None:
                 for i, gt_video in enumerate(gt_videos_list):
@@ -650,67 +673,69 @@ class SelfForcingEngine:
                     create_video_gif(gt_video, str(gt_gif_path), fps=gif_fps)
                     gt_gif_paths.append(gt_gif_path)
 
-            # Save grid
-            grid_path = samples_dir / f"step_{step:06d}_grid.png"
-            # Format labels for visualization: "Digit 0", "Digit 1", etc.
-            if digit_labels:
-                labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
-            else:
-                labels_for_viz = [""] * num_samples
-            save_video_grid(videos_list, str(grid_path), prompts=labels_for_viz)
+            # Create comparison grids for each configuration
+            for config_name, videos_list in all_configs_videos.items():
+                if gt_videos_list is not None:
+                    comparison_grid_path = samples_dir / f"step_{step:06d}_comparison_grid_{config_name}.png"
+                    comparison_videos = []
+                    comparison_prompts = []
+                    if digit_labels:
+                        labels_for_viz = [f"Digit {d}" if d is not None else "" for d in digit_labels]
+                    else:
+                        labels_for_viz = [""] * num_samples
+                    for gen_vid, gt_vid, label in zip(videos_list, gt_videos_list, labels_for_viz):
+                        comparison_videos.append(gen_vid)
+                        comparison_videos.append(gt_vid)
+                        comparison_prompts.append(f"{label} (Generated {config_name})")
+                        comparison_prompts.append(f"{label} (Ground Truth)")
+                    save_video_grid(comparison_videos, str(comparison_grid_path), prompts=comparison_prompts, ncols=2)
 
-            comparison_grid_path = None
-            if gt_videos_list is not None:
-                comparison_grid_path = samples_dir / f"step_{step:06d}_comparison_grid.png"
-                comparison_videos = []
-                comparison_prompts = []
-                for gen_vid, gt_vid, label in zip(videos_list, gt_videos_list, labels_for_viz):
-                    comparison_videos.append(gen_vid)
-                    comparison_videos.append(gt_vid)
-                    comparison_prompts.append(f"{label} (Generated)")
-                    comparison_prompts.append(f"{label} (Ground Truth)")
-                save_video_grid(comparison_videos, str(comparison_grid_path), prompts=comparison_prompts, ncols=2)
-
-            print(f"  Saved sample videos to {samples_dir}")
+            print(f"  Saved sample videos to {samples_dir} (configurations: {', '.join(all_configs_videos.keys())})")
 
             # Log to wandb
             if use_wandb and WANDB_AVAILABLE:
-                samples_payload = {
-                    "vis_sample": wandb.Image(str(grid_path)),
-                }
+                samples_payload = {}
+                
+                # Log grids for each configuration
+                for config_name, videos_list in all_configs_videos.items():
+                    grid_path = samples_dir / f"step_{step:06d}_grid_{config_name}.png"
+                    samples_payload[f"vis_sample_{config_name}"] = wandb.Image(str(grid_path))
+                    
+                    if gt_videos_list is not None:
+                        comparison_grid_path = samples_dir / f"step_{step:06d}_comparison_grid_{config_name}.png"
+                        samples_payload[f"vis_comparison_{config_name}"] = wandb.Image(str(comparison_grid_path))
 
-                if comparison_grid_path is not None:
-                    samples_payload["vis_comparison_gid"] = wandb.Image(str(comparison_grid_path))
-
+                # Create a combined table with all configurations
                 samples_table = wandb.Table(columns=[
                     "index",
                     "digit",
+                    "config",
                     "generated_video",
                     "ground_truth_video",
                 ])
-                for i, _video_tensor in enumerate(videos_list):
-                    gif_path = samples_dir / f"step_{step:06d}_sample_{i:02d}.gif"
-                    caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
-                    generated_video = wandb.Video(
-                        str(gif_path),
-                        format="gif",
-                        caption=caption,
-                    )
-                    gt_video = None
-                    if gt_gif_paths:
-                        gt_gif_path = gt_gif_paths[i]
-                        gt_caption = (
-                            f"Digit {digit_labels[i]} (GT)"
-                            if digit_labels and digit_labels[i] is not None
-                            else "Ground Truth"
-                        )
-                        gt_video = wandb.Video(
-                            str(gt_gif_path),
+                for config_name, gif_paths in all_configs_gif_paths.items():
+                    for i, gif_path in enumerate(gif_paths):
+                        caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
+                        generated_video = wandb.Video(
+                            str(gif_path),
                             format="gif",
-                            caption=gt_caption,
+                            caption=f"{caption} ({config_name})",
                         )
-                    samples_table.add_data(i, caption, generated_video, gt_video)
-                samples_payload["vis_gt"] = samples_table
+                        gt_video = None
+                        if gt_gif_paths:
+                            gt_gif_path = gt_gif_paths[i]
+                            gt_caption = (
+                                f"Digit {digit_labels[i]} (GT)"
+                                if digit_labels and digit_labels[i] is not None
+                                else "Ground Truth"
+                            )
+                            gt_video = wandb.Video(
+                                str(gt_gif_path),
+                                format="gif",
+                                caption=gt_caption,
+                            )
+                        samples_table.add_data(i, caption, config_name, generated_video, gt_video)
+                samples_payload["vis_all_configs"] = samples_table
 
                 wandb.log(samples_payload, step=step)
 

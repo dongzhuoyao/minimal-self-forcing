@@ -39,7 +39,12 @@ training:
 generation:
   num_frames: 9                # Number of frames to generate
   num_frames_per_block: 3      # Frames per block (must divide num_frames)
-  denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps
+  denoising_steps: [1000, 750, 500, 250]  # Denoising timesteps for training
+  viz_denoising_steps:  # Multiple sampling configurations for visualization comparison
+    - [1000]  # 1-step sampling
+    - [1000, 500]  # 2-step sampling (evenly spaced: 1000/2 = 500)
+    - [1000, 667, 333]  # 3-step sampling (evenly spaced: 1000/3 ≈ 333)
+    - [1000, 750, 500, 250]  # 4-step sampling (evenly spaced: 1000/4 = 250)
   output_dir: "outputs/generated"
   num_viz_samples: 10          # Number of sample videos during training
   viz_num_frames: 9            # Number of frames for visualization
