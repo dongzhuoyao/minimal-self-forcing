@@ -456,37 +456,44 @@ class SimplifiedTrainer:
 
             # Log to wandb
             if self.use_wandb:
-                wandb.log({
-                    "samples/grid": wandb.Image(str(grid_path)),
-                }, step=self.step)
+                samples_payload = {
+                    "vis_sample": wandb.Image(str(grid_path)),
+                }
 
                 if comparison_grid_path is not None:
-                    wandb.log({
-                        "samples/comparison_grid": wandb.Image(str(comparison_grid_path)),
-                    }, step=self.step)
+                    samples_payload["vis_comparison_gid"] = wandb.Image(str(comparison_grid_path))
 
-                for i, video_tensor in enumerate(videos_list):
+                samples_table = wandb.Table(columns=[
+                    "index",
+                    "digit",
+                    "generated_video",
+                    "ground_truth_video",
+                ])
+                for i, _video_tensor in enumerate(videos_list):
                     gif_path = self.samples_dir / f"step_{self.step:06d}_sample_{i:02d}.gif"
                     caption = f"Digit {digit_labels[i]}" if digit_labels and digit_labels[i] is not None else ""
-                    wandb.log({
-                        f"samples/generated_video_{i}": wandb.Video(
-                            str(gif_path),
+                    generated_video = wandb.Video(
+                        str(gif_path),
+                        format="gif",
+                        caption=caption,
+                    )
+                    gt_video = None
+                    if gt_gif_paths:
+                        gt_gif_path = gt_gif_paths[i]
+                        gt_caption = (
+                            f"Digit {digit_labels[i]} (GT)"
+                            if digit_labels and digit_labels[i] is not None
+                            else "Ground Truth"
+                        )
+                        gt_video = wandb.Video(
+                            str(gt_gif_path),
                             format="gif",
-                            caption=caption
-                        ),
-                    }, step=self.step)
+                            caption=gt_caption,
+                        )
+                    samples_table.add_data(i, caption, generated_video, gt_video)
+                samples_payload["vis_gt"] = samples_table
 
-                # Log ground truth videos
-                if gt_gif_paths:
-                    for i, gt_gif_path in enumerate(gt_gif_paths):
-                        caption = f"Digit {digit_labels[i]} (GT)" if digit_labels and digit_labels[i] is not None else "Ground Truth"
-                        wandb.log({
-                            f"samples/ground_truth_video_{i}": wandb.Video(
-                                str(gt_gif_path),
-                                format="gif",
-                                caption=caption
-                            ),
-                        }, step=self.step)
+                wandb.log(samples_payload, step=self.step)
 
         self.generator.train()
 
