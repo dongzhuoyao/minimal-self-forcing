@@ -355,13 +355,15 @@ class SelfForcingEngine:
             dtype=torch.long
         )
         
-        # Step 2: Add noise to generated video
-        noise = torch.randn_like(generated_video)
-        noisy_latent = self.scheduler.add_noise(
-            generated_video.flatten(0, 1),
-            noise.flatten(0, 1),
-            timestep.flatten(0, 1)
-        ).unflatten(0, (batch_size, num_frames))
+        # Step 2: Add noise to generated video (no gradients through noise path)
+        with torch.no_grad():
+            noise = torch.randn_like(generated_video)
+            noisy_latent = self.scheduler.add_noise(
+                generated_video.flatten(0, 1),
+                noise.flatten(0, 1),
+                timestep.flatten(0, 1)
+            ).unflatten(0, (batch_size, num_frames))
+        noisy_latent = noisy_latent.detach()
         
         # Step 3: Compute KL gradient using separate fake_score and real_score networks
         # Matching original DMD implementation:
